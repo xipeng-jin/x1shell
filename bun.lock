@@ -82,6 +82,7 @@
       "dependencies": {
         "@opentui/core": "0.1.103",
         "@opentui/react": "0.1.103",
+        "@t3tools/client-runtime": "workspace:*",
         "react": "^19.0.0",
         "web-tree-sitter": "0.25.10",
         "ws": "^8.18.0",
@@ -162,6 +163,8 @@
       "version": "0.0.0-alpha.1",
       "dependencies": {
         "@t3tools/contracts": "workspace:*",
+        "@t3tools/shared": "workspace:*",
+        "effect": "catalog:",
       },
       "devDependencies": {
         "@effect/language-service": "catalog:",
