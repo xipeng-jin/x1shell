@@ -20,6 +20,8 @@ import {
 import { resolveKeyboardPolicy } from "./terminal/keyboard.js";
 import { resolveTheme } from "./terminal/theme.js";
 import { createServerConfigStore } from "./state/serverConfigStore.js";
+import { createOrchestrationStore } from "./state/orchestrationStore.js";
+import { createThreadDetailStore } from "./state/threadDetailStore.js";
 
 type ProcessEventName =
   | "SIGINT"
@@ -56,16 +58,23 @@ async function runHeadless(
 ): Promise<void> {
   const theme = resolveTheme(config.theme ?? preferences.theme);
   const serverStore = createServerConfigStore();
+  const orchestrationStore = createOrchestrationStore();
+  const threadDetailStore = createThreadDetailStore();
+  seedHeadlessFixture(process.env, serverStore, orchestrationStore, threadDetailStore);
   const localSupervisor = await maybeStartLocalSupervisor(config, logger).catch((error) => {
     serverStore.setConnection("error", safeOutputUnknown(error));
     return null;
   });
-  const controller = await maybeCreateAttachController(config, serverStore, localSupervisor).catch(
-    (error) => {
-      serverStore.setConnection("error", safeOutputUnknown(error));
-      return null;
-    },
-  );
+  const controller = await maybeCreateAttachController(
+    config,
+    serverStore,
+    localSupervisor,
+    orchestrationStore,
+    threadDetailStore,
+  ).catch((error) => {
+    serverStore.setConnection("error", safeOutputUnknown(error));
+    return null;
+  });
   const unsubscribeRestart = localSupervisor?.onRestarted(() => controller?.reconnect());
   await controller?.connect().catch((error) => {
     serverStore.setConnection("error", safeOutputUnknown(error));
@@ -85,7 +94,15 @@ async function runHeadless(
     });
     root = createRoot(setup.renderer);
     root.render(
-      <App interruptRequestToken={0} paths={config.paths} theme={theme} onRequestExit={() => {}} />,
+      <App
+        interruptRequestToken={0}
+        paths={config.paths}
+        theme={theme}
+        serverStatus={serverStore.getSnapshot()}
+        shellState={orchestrationStore.getSnapshot()}
+        threadDetailState={threadDetailStore.getSnapshot()}
+        onRequestExit={() => {}}
+      />,
     );
     await wait(config.headless.settleMs);
     await setup.renderOnce();
@@ -102,6 +119,114 @@ async function runHeadless(
   }
 }
 
+function seedHeadlessFixture(
+  env: NodeJS.ProcessEnv,
+  serverStore: ReturnType<typeof createServerConfigStore>,
+  orchestrationStore: ReturnType<typeof createOrchestrationStore>,
+  threadDetailStore: ReturnType<typeof createThreadDetailStore>,
+) {
+  if (env.X1SHELL_HEADLESS_PHASE6_FIXTURE !== "1") return;
+  serverStore.setConnection("connected");
+  orchestrationStore.applyShellItem({
+    kind: "snapshot",
+    snapshot: {
+      snapshotSequence: 42,
+      updatedAt: "2026-04-28T00:00:00.000Z",
+      projects: [
+        {
+          id: "project-a",
+          title: "Project",
+          workspaceRoot: "/repo/project",
+          defaultModelSelection: { provider: "codex", model: "gpt-5" },
+          scripts: [],
+          createdAt: "2026-04-28T00:00:00.000Z",
+          updatedAt: "2026-04-28T00:00:00.000Z",
+        } as never,
+      ],
+      threads: [
+        {
+          id: "thread-a",
+          projectId: "project-a",
+          title: "Thread Shell Fresh",
+          modelSelection: { provider: "codex", model: "gpt-5" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: "main",
+          worktreePath: "/repo/project",
+          latestTurn: null,
+          createdAt: "2026-04-28T00:00:00.000Z",
+          updatedAt: "2026-04-28T00:00:00.000Z",
+          archivedAt: null,
+          session: null,
+          latestUserMessageAt: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+        } as never,
+      ],
+    },
+  });
+  orchestrationStore.setDraft("project-a" as never, "draft");
+  threadDetailStore.applyThreadItem("thread-a" as never, {
+    kind: "snapshot",
+    snapshot: {
+      snapshotSequence: 43,
+      thread: {
+        id: "thread-a",
+        projectId: "project-a",
+        title: "Thread Detail Stale",
+        modelSelection: { provider: "codex", model: "gpt-5" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: "main",
+        worktreePath: "/repo/project",
+        latestTurn: null,
+        createdAt: "2026-04-28T00:00:00.000Z",
+        updatedAt: "2026-04-28T00:00:00.000Z",
+        archivedAt: null,
+        deletedAt: null,
+        messages: [
+          {
+            id: "message-a",
+            role: "assistant",
+            text: "hello \u001b]8;;https://evil.example\u0007link\u001b]8;;\u0007",
+            attachments: [],
+            turnId: null,
+            streaming: false,
+            createdAt: "2026-04-28T00:00:00.000Z",
+            updatedAt: "2026-04-28T00:00:00.000Z",
+          },
+        ],
+        proposedPlans: [
+          {
+            id: "plan-a",
+            turnId: null,
+            planMarkdown: "Plan with token=plan-secret and [link](https://evil.example/plan)",
+            implementedAt: null,
+            implementationThreadId: null,
+            createdAt: "2026-04-28T00:00:02.000Z",
+            updatedAt: "2026-04-28T00:00:02.000Z",
+          },
+        ],
+        activities: [
+          {
+            id: "event-a",
+            tone: "tool",
+            kind: "tool",
+            summary: "ran ls",
+            payload: {},
+            turnId: null,
+            sequence: 43,
+            createdAt: "2026-04-28T00:00:01.000Z",
+          },
+        ],
+        checkpoints: [],
+        session: null,
+      } as never,
+    },
+  });
+}
+
 async function runInteractive(
   config: ReturnType<typeof resolveCliConfig>,
   preferences: Awaited<ReturnType<typeof readPreferences>>,
@@ -114,16 +239,22 @@ async function runInteractive(
   let shuttingDown = false;
   const interruptRequestToken = 0;
   const serverStore = createServerConfigStore();
+  const orchestrationStore = createOrchestrationStore();
+  const threadDetailStore = createThreadDetailStore();
   const localSupervisor = await maybeStartLocalSupervisor(config, logger).catch((error) => {
     serverStore.setConnection("error", safeOutputUnknown(error));
     return null;
   });
-  const controller = await maybeCreateAttachController(config, serverStore, localSupervisor).catch(
-    (error) => {
-      serverStore.setConnection("error", safeOutputUnknown(error));
-      return null;
-    },
-  );
+  const controller = await maybeCreateAttachController(
+    config,
+    serverStore,
+    localSupervisor,
+    orchestrationStore,
+    threadDetailStore,
+  ).catch((error) => {
+    serverStore.setConnection("error", safeOutputUnknown(error));
+    return null;
+  });
   const unsubscribeRestart = localSupervisor?.onRestarted(() => controller?.reconnect());
 
   const render = () => {
@@ -133,6 +264,25 @@ async function runInteractive(
         paths={config.paths}
         theme={theme}
         serverStatus={serverStore.getSnapshot()}
+        shellState={orchestrationStore.getSnapshot()}
+        threadDetailState={threadDetailStore.getSnapshot()}
+        onSelectNextThread={(direction) => {
+          orchestrationStore.selectNextThread(direction);
+          controller?.setActiveThread(orchestrationStore.getSnapshot().selectedThreadId);
+        }}
+        onNewThread={() => {
+          orchestrationStore.createProjectDraft();
+          controller?.setActiveThread(null);
+        }}
+        onDraftChange={(projectId, draft) => orchestrationStore.setDraft(projectId, draft)}
+        onPromoteProjectDraft={(projectId, threadId) => {
+          orchestrationStore.promoteProjectDraft(projectId, threadId);
+          controller?.setActiveThread(threadId);
+        }}
+        onSubmitCommand={(command) => {
+          if (!controller) return Promise.reject(new Error("Not connected."));
+          return controller.dispatchCommand(command);
+        }}
         onRequestExit={() => void shutdown(0)}
       />,
     );
@@ -195,7 +345,11 @@ async function runInteractive(
 
   try {
     const unsubscribeServerStore = serverStore.subscribe(() => render());
+    const unsubscribeShellStore = orchestrationStore.subscribe(() => render());
+    const unsubscribeThreadStore = threadDetailStore.subscribe(() => render());
     renderer.once("destroy", unsubscribeServerStore);
+    renderer.once("destroy", unsubscribeShellStore);
+    renderer.once("destroy", unsubscribeThreadStore);
     render();
     void controller?.connect().catch((error) => {
       serverStore.setConnection("error", safeOutputUnknown(error));
@@ -211,12 +365,19 @@ async function maybeCreateAttachController(
   config: ReturnType<typeof resolveCliConfig>,
   serverStore: ReturnType<typeof createServerConfigStore>,
   localSupervisor: LocalManagedSupervisor | null | undefined,
+  orchestrationStore: ReturnType<typeof createOrchestrationStore>,
+  threadDetailStore: ReturnType<typeof createThreadDetailStore>,
 ) {
   if (config.attach.mode === "local-managed") {
     if (!localSupervisor) return null;
     const target = localSupervisor.target;
     serverStore.setAuth("owner");
-    return createTuiConnectionController({ target, store: serverStore });
+    return createTuiConnectionController({
+      target,
+      store: serverStore,
+      orchestrationStore,
+      threadDetailStore,
+    });
   }
   if (!config.attach.url) {
     return null;
@@ -229,7 +390,12 @@ async function maybeCreateAttachController(
     ? await resolveBootstrapAttachTarget({ baseUrl: config.attach.url, credential: secret })
     : await resolveBearerAttachTarget({ baseUrl: config.attach.url, bearerToken: secret });
   serverStore.setAuth(config.attach.credentialStdin ? "bootstrap" : "bearer");
-  return createTuiConnectionController({ target, store: serverStore });
+  return createTuiConnectionController({
+    target,
+    store: serverStore,
+    orchestrationStore,
+    threadDetailStore,
+  });
 }
 
 async function maybeStartLocalSupervisor(

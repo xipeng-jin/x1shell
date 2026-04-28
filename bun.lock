@@ -84,6 +84,7 @@
         "@opentui/react": "0.1.103",
         "@t3tools/client-runtime": "workspace:*",
         "@t3tools/contracts": "workspace:*",
+        "@t3tools/shared": "workspace:*",
         "react": "^19.0.0",
         "web-tree-sitter": "0.25.10",
         "ws": "^8.18.0",

@@ -14,8 +14,14 @@ import {
 import type { AttachTarget } from "./attach.js";
 import { safeOutputText } from "./log.js";
 import type { createServerConfigStore } from "../state/serverConfigStore.js";
+import type { createOrchestrationStore } from "../state/orchestrationStore.js";
+import type { createThreadDetailStore } from "../state/threadDetailStore.js";
+import { isSnapshotRequiredThreadEvent } from "../state/threadDetailStore.js";
+import type { ThreadId } from "@t3tools/contracts";
 
 type ServerConfigStore = ReturnType<typeof createServerConfigStore>;
+type OrchestrationStore = ReturnType<typeof createOrchestrationStore>;
+type ThreadDetailStore = ReturnType<typeof createThreadDetailStore>;
 
 export interface TuiWsConnectionOptions {
   readonly lifecycle?: WsProtocolLifecycleHandlers;
@@ -56,12 +62,16 @@ export function resolveTuiAuthenticatedWebSocketUrl(input: {
 export interface TuiConnectionController {
   readonly connect: () => Promise<void>;
   readonly reconnect: () => Promise<void>;
+  readonly setActiveThread: (threadId: ThreadId | null) => void;
+  readonly dispatchCommand: WsRpcClient["orchestration"]["dispatchCommand"];
   readonly dispose: () => Promise<void>;
 }
 
 export function createTuiConnectionController(input: {
   readonly target: AttachTarget;
   readonly store: ServerConfigStore;
+  readonly orchestrationStore?: OrchestrationStore;
+  readonly threadDetailStore?: ThreadDetailStore;
   readonly options?: TuiWsConnectionOptions;
   readonly createConnection?: typeof createTuiWsConnection;
 }): TuiConnectionController {
@@ -69,6 +79,10 @@ export function createTuiConnectionController(input: {
   let unsubscribeConfig: (() => void) | null = null;
   let unsubscribeLifecycle: (() => void) | null = null;
   let unsubscribeShell: (() => void) | null = null;
+  let unsubscribeThread: (() => void) | null = null;
+  let subscribedThreadId: ThreadId | null = null;
+  let subscribedThreadGeneration: number | null = null;
+  let activeThreadId: ThreadId | null = null;
   let reconnectChain: Promise<void> = Promise.resolve();
   let disposed = false;
   let connectionGeneration = 0;
@@ -76,6 +90,7 @@ export function createTuiConnectionController(input: {
   const disposeCurrent = async () => {
     connectionGeneration += 1;
     unsubscribeShell?.();
+    releaseThreadSubscription({ evict: false });
     unsubscribeLifecycle?.();
     unsubscribeConfig?.();
     unsubscribeShell = null;
@@ -130,16 +145,75 @@ export function createTuiConnectionController(input: {
         return;
       }
       input.store.applyShellItem(item);
+      input.orchestrationStore?.applyShellItem(item);
+      reconcileActiveThreadSubscription(connection, generation);
       if (item.kind === "snapshot") {
         input.store.setConnection("connected");
         firstShellSnapshot.resolve();
       }
     });
+    if (activeThreadId) {
+      subscribeActiveThread(connection, generation, activeThreadId);
+    }
     await withTimeout(
       firstShellSnapshot.promise,
       15_000,
       "Timed out waiting for initial shell snapshot.",
     );
+  };
+
+  const subscribeActiveThread = (
+    connection: TuiWsConnection,
+    generation: number,
+    threadId: ThreadId,
+    options: { readonly force?: boolean } = {},
+  ) => {
+    if (
+      !options.force &&
+      unsubscribeThread &&
+      subscribedThreadId === threadId &&
+      subscribedThreadGeneration === generation
+    ) {
+      return;
+    }
+    const previousThreadId = subscribedThreadId;
+    releaseThreadSubscription({
+      evict: Boolean(previousThreadId && previousThreadId !== threadId && !options.force),
+    });
+    subscribedThreadId = threadId;
+    subscribedThreadGeneration = generation;
+    unsubscribeThread = connection.client.orchestration.subscribeThread({ threadId }, (item) => {
+      if (disposed || current !== connection || generation !== connectionGeneration) return;
+      if (isSnapshotRequiredThreadEvent(item)) {
+        subscribeActiveThread(connection, generation, threadId, { force: true });
+        return;
+      }
+      input.threadDetailStore?.applyThreadItem(threadId, item);
+    });
+  };
+
+  const releaseThreadSubscription = (options: { readonly evict: boolean }) => {
+    const previousThreadId = subscribedThreadId;
+    unsubscribeThread?.();
+    unsubscribeThread = null;
+    subscribedThreadId = null;
+    subscribedThreadGeneration = null;
+    if (options.evict && previousThreadId) {
+      input.threadDetailStore?.clearThread(previousThreadId);
+    }
+  };
+
+  const reconcileActiveThreadSubscription = (connection: TuiWsConnection, generation: number) => {
+    const shell = input.orchestrationStore?.getSnapshot();
+    if (!shell) return;
+    const selectedThreadId = shell?.selectedThreadId ?? null;
+    if (!selectedThreadId) {
+      activeThreadId = null;
+      releaseThreadSubscription({ evict: true });
+      return;
+    }
+    activeThreadId = selectedThreadId;
+    subscribeActiveThread(connection, generation, selectedThreadId);
   };
 
   const scheduleReconnect = () => {
@@ -157,6 +231,18 @@ export function createTuiConnectionController(input: {
   return {
     connect: () => connectFresh("connecting"),
     reconnect: scheduleReconnect,
+    setActiveThread: (threadId) => {
+      activeThreadId = threadId;
+      if (current && threadId) {
+        subscribeActiveThread(current, connectionGeneration, threadId);
+      } else {
+        releaseThreadSubscription({ evict: true });
+      }
+    },
+    dispatchCommand: (command) => {
+      if (!current) return Promise.reject(new Error("Not connected."));
+      return current.client.orchestration.dispatchCommand(command);
+    },
     dispose: async () => {
       disposed = true;
       await disposeCurrent();

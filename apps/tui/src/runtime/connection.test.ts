@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WsRpcProtocolSocketUrlProvider } from "@t3tools/client-runtime/ws";
 import { createServerConfigStore } from "../state/serverConfigStore.js";
+import { createOrchestrationStore } from "../state/orchestrationStore.js";
+import { createThreadDetailStore } from "../state/threadDetailStore.js";
 import {
   createTuiConnectionController,
   createTuiWsConnection,
@@ -367,6 +369,153 @@ describe("TUI connection runtime", () => {
       error: "Authorization: [REDACTED] failed",
     });
   });
+
+  it("subscribes active thread, unsubscribes on selection change, and resubscribes on reconnect", async () => {
+    const store = createServerConfigStore();
+    const threadDetailStore = createThreadDetailStore();
+    const subscribed: string[] = [];
+    const unsubscribed: string[] = [];
+    let connectionCount = 0;
+    const controller = createTuiConnectionController({
+      target: attachTarget(),
+      store,
+      threadDetailStore,
+      createConnection: () => {
+        connectionCount += 1;
+        return fakeConnection({
+          shellSnapshot: shellSnapshot(connectionCount, "thread-a"),
+          subscribeThread: (threadId, listener) => {
+            subscribed.push(`${connectionCount}:${threadId}`);
+            listener({
+              kind: "snapshot",
+              snapshot: {
+                snapshotSequence: connectionCount,
+                thread: { id: threadId, messages: [`snapshot-${threadId}`] },
+              },
+            });
+            return () => unsubscribed.push(`${connectionCount}:${threadId}`);
+          },
+        });
+      },
+    });
+
+    await controller.connect();
+    controller.setActiveThread("thread-a" as never);
+    expect(threadDetailStore.getSnapshot().entries["thread-a"]?.thread).toMatchObject({
+      messages: ["snapshot-thread-a"],
+    });
+    controller.setActiveThread("thread-b" as never);
+    expect(threadDetailStore.getSnapshot().entries["thread-a"]).toBeUndefined();
+    expect(threadDetailStore.getSnapshot().entries["thread-b"]?.thread).toMatchObject({
+      messages: ["snapshot-thread-b"],
+    });
+    await controller.reconnect();
+
+    expect(subscribed).toEqual(["1:thread-a", "1:thread-b", "2:thread-b"]);
+    expect(unsubscribed).toEqual(["1:thread-a", "1:thread-b"]);
+    expect(threadDetailStore.getSnapshot().entries["thread-b"]?.thread).toMatchObject({
+      messages: ["snapshot-thread-b"],
+    });
+
+    await controller.dispose();
+    expect(unsubscribed).toEqual(["1:thread-a", "1:thread-b", "2:thread-b"]);
+  });
+
+  it("reconciles active thread subscriptions from authoritative shell snapshots", async () => {
+    const store = createServerConfigStore();
+    const orchestrationStore = createOrchestrationStore();
+    const subscribed: string[] = [];
+    const unsubscribed: string[] = [];
+    let connectionCount = 0;
+    const controller = createTuiConnectionController({
+      target: attachTarget(),
+      store,
+      orchestrationStore,
+      createConnection: () => {
+        connectionCount += 1;
+        return fakeConnection({
+          shellSnapshot:
+            connectionCount === 1
+              ? shellSnapshotWithThreads(1, ["thread-a"])
+              : shellSnapshotWithThreads(2, ["thread-b"]),
+          subscribeThread: (threadId) => {
+            subscribed.push(`${connectionCount}:${threadId}`);
+            return () => unsubscribed.push(`${connectionCount}:${threadId}`);
+          },
+        });
+      },
+    });
+
+    await controller.connect();
+    expect(orchestrationStore.getSnapshot().selectedThreadId).toBe("thread-a");
+    expect(subscribed).toEqual(["1:thread-a"]);
+
+    await controller.reconnect();
+
+    expect(orchestrationStore.getSnapshot().selectedThreadId).toBe("thread-b");
+    expect(subscribed).toEqual(["1:thread-a", "2:thread-b"]);
+    expect(unsubscribed).toEqual(["1:thread-a"]);
+
+    await controller.dispose();
+    expect(unsubscribed).toEqual(["1:thread-a", "2:thread-b"]);
+  });
+
+  it("resubscribes active thread detail from snapshot when a revert event cannot be reduced locally", async () => {
+    const store = createServerConfigStore();
+    const threadDetailStore = createThreadDetailStore();
+    const subscribed: string[] = [];
+    const unsubscribed: string[] = [];
+    let threadListener: ((item: unknown) => void) | undefined;
+    let snapshotCount = 0;
+    const controller = createTuiConnectionController({
+      target: attachTarget(),
+      store,
+      threadDetailStore,
+      createConnection: () =>
+        fakeConnection({
+          shellSnapshot: shellSnapshot(1, "thread-a"),
+          subscribeThread: (threadId, listener) => {
+            subscribed.push(threadId);
+            threadListener = listener;
+            snapshotCount += 1;
+            listener({
+              kind: "snapshot",
+              snapshot: {
+                snapshotSequence: snapshotCount,
+                thread: { id: threadId, messages: [`snapshot-${snapshotCount}`] },
+              },
+            });
+            return () => unsubscribed.push(threadId);
+          },
+        }),
+    });
+
+    await controller.connect();
+    controller.setActiveThread("thread-a" as never);
+    expect(threadDetailStore.getSnapshot().entries["thread-a"]?.thread).toMatchObject({
+      messages: ["snapshot-1"],
+    });
+
+    threadListener?.({
+      kind: "event",
+      event: {
+        type: "thread.reverted",
+        sequence: 2,
+        aggregateKind: "thread",
+        aggregateId: "thread-a",
+        payload: { threadId: "thread-a", turnCount: 0 },
+      },
+    });
+
+    expect(subscribed).toEqual(["thread-a", "thread-a"]);
+    expect(unsubscribed).toEqual(["thread-a"]);
+    expect(threadDetailStore.getSnapshot().entries["thread-a"]?.thread).toMatchObject({
+      messages: ["snapshot-2"],
+    });
+
+    await controller.dispose();
+    expect(unsubscribed).toEqual(["thread-a", "thread-a"]);
+  });
 });
 
 function fakeConnection(input: {
@@ -375,6 +524,7 @@ function fakeConnection(input: {
   readonly configPromise?: Promise<unknown>;
   readonly configEvent?: unknown;
   readonly dispose?: () => void;
+  readonly subscribeThread?: (threadId: string, listener: (item: unknown) => void) => () => void;
 }): TuiWsConnection {
   return {
     client: {
@@ -393,6 +543,19 @@ function fakeConnection(input: {
         subscribeShell: (listener: (item: unknown) => void) => {
           listener({ kind: "snapshot", snapshot: input.shellSnapshot });
           return () => undefined;
+        },
+        subscribeThread: (
+          request: { readonly threadId: string },
+          listener: (item: unknown) => void,
+        ) => {
+          listener({
+            kind: "snapshot",
+            snapshot: {
+              snapshotSequence: 1,
+              thread: { id: request.threadId },
+            },
+          });
+          return input.subscribeThread?.(request.threadId, listener) ?? (() => undefined);
         },
       },
     } as never,
@@ -433,6 +596,43 @@ function shellSnapshot(sequence: number, threadId: string) {
     updatedAt: "2026-04-27T00:00:00.000Z",
     projects: [],
     threads: [{ id: threadId }],
+  } as never;
+}
+
+function shellSnapshotWithThreads(sequence: number, threadIds: string[]) {
+  return {
+    snapshotSequence: sequence,
+    updatedAt: "2026-04-27T00:00:00.000Z",
+    projects: [
+      {
+        id: "project-a",
+        title: "Project",
+        workspaceRoot: "/repo/project",
+        defaultModelSelection: { provider: "codex", model: "gpt-5" },
+        scripts: [],
+        createdAt: "2026-04-27T00:00:00.000Z",
+        updatedAt: "2026-04-27T00:00:00.000Z",
+      },
+    ],
+    threads: threadIds.map((id) => ({
+      id,
+      projectId: "project-a",
+      title: id,
+      modelSelection: { provider: "codex", model: "gpt-5" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: "main",
+      worktreePath: "/repo/project",
+      latestTurn: null,
+      createdAt: "2026-04-27T00:00:00.000Z",
+      updatedAt: "2026-04-27T00:00:00.000Z",
+      archivedAt: null,
+      session: null,
+      latestUserMessageAt: null,
+      hasPendingApprovals: false,
+      hasPendingUserInput: false,
+      hasActionableProposedPlan: false,
+    })),
   } as never;
 }
 
