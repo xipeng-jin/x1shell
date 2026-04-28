@@ -1,4 +1,17 @@
-import { Cause, Duration, Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
+import {
+  Cause,
+  Channel,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  PubSub,
+  Queue,
+  Ref,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import {
   type AuthAccessStreamEvent,
   AuthSessionId,
@@ -87,6 +100,20 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
 }
 
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
+
+function acquireSubscriptionQueue<A>(
+  subscription: PubSub.Subscription<A>,
+): Effect.Effect<Queue.Dequeue<A, Cause.Done>, never, Scope.Scope> {
+  return Effect.gen(function* () {
+    const queue = yield* Queue.unbounded<A, Cause.Done>();
+    yield* Effect.addFinalizer(() => Queue.shutdown(queue));
+    yield* Stream.runIntoQueue(
+      Stream.fromChannel(Channel.fromSubscriptionArray(subscription)),
+      queue,
+    ).pipe(Effect.forkScoped);
+    return queue;
+  });
+}
 
 function toAuthAccessStreamEvent(
   change: BootstrapCredentialChange | SessionCredentialChange,
@@ -666,6 +693,8 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeShell,
             Effect.gen(function* () {
+              const domainEventSubscription = yield* orchestrationEngine.subscribeDomainEvents;
+              const domainEventQueue = yield* acquireSubscriptionQueue(domainEventSubscription);
               const snapshot = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
                 Effect.mapError(
                   (cause) =>
@@ -676,7 +705,8 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                 ),
               );
 
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
+              const liveStream = Stream.fromQueue(domainEventQueue).pipe(
+                Stream.filter((event) => event.sequence > snapshot.snapshotSequence),
                 Stream.mapEffect(toShellStreamEvent),
                 Stream.flatMap((event) =>
                   Option.isSome(event) ? Stream.succeed(event.value) : Stream.empty,
@@ -697,8 +727,11 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcStreamEffect(
             ORCHESTRATION_WS_METHODS.subscribeThread,
             Effect.gen(function* () {
-              const [threadDetail, snapshotSequence] = yield* Effect.all([
-                projectionSnapshotQuery.getThreadDetailById(input.threadId).pipe(
+              const domainEventSubscription = yield* orchestrationEngine.subscribeDomainEvents;
+              const domainEventQueue = yield* acquireSubscriptionQueue(domainEventSubscription);
+              const threadDetailSnapshot = yield* projectionSnapshotQuery
+                .getThreadDetailSnapshotById(input.threadId)
+                .pipe(
                   Effect.mapError(
                     (cause) =>
                       new OrchestrationGetSnapshotError({
@@ -706,25 +739,23 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                         cause,
                       }),
                   ),
-                ),
-                orchestrationEngine
-                  .getReadModel()
-                  .pipe(Effect.map((readModel) => readModel.snapshotSequence)),
-              ]);
+                );
 
-              if (Option.isNone(threadDetail)) {
+              if (Option.isNone(threadDetailSnapshot)) {
                 return yield* new OrchestrationGetSnapshotError({
                   message: `Thread ${input.threadId} was not found`,
                   cause: input.threadId,
                 });
               }
 
-              const liveStream = orchestrationEngine.streamDomainEvents.pipe(
+              const snapshot = threadDetailSnapshot.value;
+              const liveStream = Stream.fromQueue(domainEventQueue).pipe(
                 Stream.filter(
                   (event) =>
                     event.aggregateKind === "thread" &&
                     event.aggregateId === input.threadId &&
-                    isThreadDetailEvent(event),
+                    isThreadDetailEvent(event) &&
+                    event.sequence > snapshot.snapshotSequence,
                 ),
                 Stream.map((event) => ({
                   kind: "event" as const,
@@ -735,10 +766,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               return Stream.concat(
                 Stream.make({
                   kind: "snapshot" as const,
-                  snapshot: {
-                    snapshotSequence,
-                    thread: threadDetail.value,
-                  },
+                  snapshot,
                 }),
                 liveStream,
               );
@@ -1011,11 +1039,15 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
           observeRpcStreamEffect(
             WS_METHODS.subscribeServerLifecycle,
             Effect.gen(function* () {
+              const lifecycleEventSubscription = yield* lifecycleEvents.subscribe;
+              const lifecycleEventQueue = yield* acquireSubscriptionQueue(
+                lifecycleEventSubscription,
+              );
               const snapshot = yield* lifecycleEvents.snapshot;
               const snapshotEvents = Array.from(snapshot.events).toSorted(
                 (left, right) => left.sequence - right.sequence,
               );
-              const liveEvents = lifecycleEvents.stream.pipe(
+              const liveEvents = Stream.fromQueue(lifecycleEventQueue).pipe(
                 Stream.filter((event) => event.sequence > snapshot.sequence),
               );
               return Stream.concat(Stream.fromIterable(snapshotEvents), liveEvents);

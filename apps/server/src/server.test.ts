@@ -18,6 +18,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   ProjectId,
   ResolvedKeybindingRule,
+  type ServerLifecycleStreamEvent,
   ThreadId,
   WS_METHODS,
   WsRpcGroup,
@@ -34,6 +35,7 @@ import {
   ManagedRuntime,
   Option,
   Path,
+  PubSub,
   Stream,
 } from "effect";
 import {
@@ -459,6 +461,9 @@ const buildAppUnderTest = (options?: {
           readEvents: () => Stream.empty,
           dispatch: () => Effect.succeed({ sequence: 0 }),
           streamDomainEvents: Stream.empty,
+          subscribeDomainEvents: PubSub.unbounded<OrchestrationEvent>().pipe(
+            Effect.flatMap(PubSub.subscribe),
+          ),
           ...options?.layers?.orchestrationEngine,
         }),
       ),
@@ -474,6 +479,7 @@ const buildAppUnderTest = (options?: {
             }),
           getProjectShellById: () => Effect.succeed(Option.none()),
           getThreadShellById: () => Effect.succeed(Option.none()),
+          getThreadDetailSnapshotById: () => Effect.succeed(Option.none()),
           getThreadDetailById: () => Effect.succeed(Option.none()),
           getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
           getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
@@ -515,6 +521,9 @@ const buildAppUnderTest = (options?: {
           publish: (event) => Effect.succeed({ ...(event as any), sequence: 1 }),
           snapshot: Effect.succeed({ sequence: 0, events: [] }),
           stream: Stream.empty,
+          subscribe: PubSub.unbounded<ServerLifecycleStreamEvent>().pipe(
+            Effect.flatMap(PubSub.subscribe),
+          ),
           ...options?.layers?.serverLifecycleEvents,
         }),
       ),
@@ -1980,12 +1989,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             },
           },
         ] as const;
-        const liveEvents = Stream.make({
+        const pubsub = yield* PubSub.unbounded<ServerLifecycleStreamEvent>();
+        const subscribed = yield* Deferred.make<void>();
+        const liveEvent = {
           version: 1 as const,
           sequence: 2,
           type: "ready" as const,
           payload: { at: new Date().toISOString(), environment: testEnvironmentDescriptor },
-        });
+        } satisfies ServerLifecycleStreamEvent;
 
         yield* buildAppUnderTest({
           layers: {
@@ -1993,8 +2004,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               snapshot: Effect.succeed({
                 sequence: 1,
                 events: lifecycleEvents,
-              }),
-              stream: liveEvents,
+              }).pipe(
+                Effect.tap(() => Deferred.await(subscribed)),
+                Effect.tap(() => PubSub.publish(pubsub, liveEvent)),
+              ),
+              stream: Stream.fromPubSub(pubsub),
+              subscribe: PubSub.subscribe(pubsub).pipe(
+                Effect.tap(() => Deferred.succeed(subscribed, undefined)),
+              ),
             },
           },
         });
@@ -2011,6 +2028,231 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(first?.sequence, 1);
         assert.equal(second?.type, "ready");
         assert.equal(second?.sequence, 2);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "routes websocket rpc subscribeShell buffers events published during snapshot read",
+    () =>
+      Effect.gen(function* () {
+        const pubsub = yield* PubSub.unbounded<OrchestrationEvent>();
+        const subscribed = yield* Deferred.make<void>();
+        const event = {
+          eventId: EventId.make("event-shell-race"),
+          sequence: 1,
+          type: "thread.activity-appended" as const,
+          aggregateKind: "thread" as const,
+          aggregateId: defaultThreadId,
+          occurredAt: "2026-04-12T00:00:01.000Z",
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          payload: {
+            threadId: defaultThreadId,
+            activity: {
+              id: EventId.make("activity-shell-race"),
+              tone: "info" as const,
+              kind: "runtime.note",
+              summary: "published during shell snapshot",
+              payload: {},
+              turnId: null,
+              sequence: 1,
+              createdAt: "2026-04-12T00:00:01.000Z",
+            },
+          },
+        } satisfies OrchestrationEvent;
+
+        yield* buildAppUnderTest({
+          layers: {
+            orchestrationEngine: {
+              streamDomainEvents: Stream.concat(
+                Stream.fromEffect(Deferred.succeed(subscribed, undefined)).pipe(Stream.drain),
+                Stream.fromPubSub(pubsub),
+              ),
+              subscribeDomainEvents: PubSub.subscribe(pubsub).pipe(
+                Effect.tap(() => Deferred.succeed(subscribed, undefined)),
+              ),
+            },
+            projectionSnapshotQuery: {
+              getShellSnapshot: () =>
+                Deferred.await(subscribed).pipe(
+                  Effect.flatMap(() => PubSub.publish(pubsub, event)),
+                  Effect.as({
+                    snapshotSequence: 0,
+                    projects: [],
+                    threads: [],
+                    updatedAt: "2026-04-12T00:00:00.000Z",
+                  }),
+                ),
+              getThreadShellById: () =>
+                Effect.succeed(Option.some(makeDefaultOrchestrationThreadShell())),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const events = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeShell]({}).pipe(
+              Stream.take(2),
+              Stream.runCollect,
+            ),
+          ),
+        );
+
+        const [snapshot, liveEvent] = Array.from(events);
+        assert.equal(snapshot?.kind, "snapshot");
+        assert.equal(liveEvent?.kind, "thread-upserted");
+        if (liveEvent?.kind === "thread-upserted") {
+          assert.equal(liveEvent.sequence, 1);
+        }
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "routes websocket rpc subscribeThread buffers matching events published during snapshot read",
+    () =>
+      Effect.gen(function* () {
+        const pubsub = yield* PubSub.unbounded<OrchestrationEvent>();
+        const subscribed = yield* Deferred.make<void>();
+        const thread = makeDefaultOrchestrationReadModel().threads[0]!;
+        const event = {
+          eventId: EventId.make("event-thread-race"),
+          sequence: 1,
+          type: "thread.activity-appended" as const,
+          aggregateKind: "thread" as const,
+          aggregateId: defaultThreadId,
+          occurredAt: "2026-04-12T00:00:01.000Z",
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          payload: {
+            threadId: defaultThreadId,
+            activity: {
+              id: EventId.make("activity-thread-race"),
+              tone: "info" as const,
+              kind: "runtime.note",
+              summary: "published during thread snapshot",
+              payload: {},
+              turnId: null,
+              sequence: 1,
+              createdAt: "2026-04-12T00:00:01.000Z",
+            },
+          },
+        } satisfies OrchestrationEvent;
+
+        yield* buildAppUnderTest({
+          layers: {
+            orchestrationEngine: {
+              streamDomainEvents: Stream.concat(
+                Stream.fromEffect(Deferred.succeed(subscribed, undefined)).pipe(Stream.drain),
+                Stream.fromPubSub(pubsub),
+              ),
+              subscribeDomainEvents: PubSub.subscribe(pubsub).pipe(
+                Effect.tap(() => Deferred.succeed(subscribed, undefined)),
+              ),
+            },
+            projectionSnapshotQuery: {
+              getThreadDetailSnapshotById: () =>
+                Deferred.await(subscribed).pipe(
+                  Effect.flatMap(() => PubSub.publish(pubsub, event)),
+                  Effect.as(
+                    Option.some({
+                      snapshotSequence: 0,
+                      thread,
+                    }),
+                  ),
+                ),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const events = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeThread]({ threadId: defaultThreadId }).pipe(
+              Stream.take(2),
+              Stream.runCollect,
+            ),
+          ),
+        );
+
+        const [snapshot, liveEvent] = Array.from(events);
+        assert.equal(snapshot?.kind, "snapshot");
+        assert.equal(liveEvent?.kind, "event");
+        if (liveEvent?.kind === "event") {
+          assert.equal(liveEvent.event.sequence, 1);
+          assert.equal(liveEvent.event.eventId, EventId.make("event-thread-race"));
+        }
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "routes websocket rpc subscribeServerLifecycle buffers ready during snapshot read",
+    () =>
+      Effect.gen(function* () {
+        const pubsub = yield* PubSub.unbounded<{
+          version: 1;
+          sequence: number;
+          type: "ready";
+          payload: { at: string; environment: typeof testEnvironmentDescriptor };
+        }>();
+        const subscribed = yield* Deferred.make<void>();
+        const ready = {
+          version: 1 as const,
+          sequence: 2,
+          type: "ready" as const,
+          payload: {
+            at: "2026-04-12T00:00:01.000Z",
+            environment: testEnvironmentDescriptor,
+          },
+        };
+
+        yield* buildAppUnderTest({
+          layers: {
+            serverLifecycleEvents: {
+              snapshot: Deferred.await(subscribed).pipe(
+                Effect.flatMap(() => PubSub.publish(pubsub, ready)),
+                Effect.as({
+                  sequence: 1,
+                  events: [
+                    {
+                      version: 1 as const,
+                      sequence: 1,
+                      type: "welcome" as const,
+                      payload: {
+                        environment: testEnvironmentDescriptor,
+                        cwd: "/tmp/project",
+                        projectName: "project",
+                      },
+                    },
+                  ],
+                }),
+              ),
+              stream: Stream.concat(
+                Stream.fromEffect(Deferred.succeed(subscribed, undefined)).pipe(Stream.drain),
+                Stream.fromPubSub(pubsub),
+              ),
+              subscribe: PubSub.subscribe(pubsub).pipe(
+                Effect.tap(() => Deferred.succeed(subscribed, undefined)),
+              ),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const events = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.subscribeServerLifecycle]({}).pipe(Stream.take(2), Stream.runCollect),
+          ),
+        );
+
+        const [welcome, liveReady] = Array.from(events);
+        assert.equal(welcome?.type, "welcome");
+        assert.equal(liveReady?.type, "ready");
+        assert.equal(liveReady?.sequence, 2);
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

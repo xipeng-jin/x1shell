@@ -1,5 +1,6 @@
 import type { ServerLifecycleStreamEvent } from "@t3tools/contracts";
 import { Effect, Layer, PubSub, Ref, Context, Stream } from "effect";
+import type { Scope } from "effect";
 
 type LifecycleEventInput =
   | Omit<Extract<ServerLifecycleStreamEvent, { type: "welcome" }>, "sequence">
@@ -14,6 +15,11 @@ export interface ServerLifecycleEventsShape {
   readonly publish: (event: LifecycleEventInput) => Effect.Effect<ServerLifecycleStreamEvent>;
   readonly snapshot: Effect.Effect<SnapshotState>;
   readonly stream: Stream.Stream<ServerLifecycleStreamEvent>;
+  readonly subscribe: Effect.Effect<
+    PubSub.Subscription<ServerLifecycleStreamEvent>,
+    never,
+    Scope.Scope
+  >;
 }
 
 export class ServerLifecycleEvents extends Context.Service<
@@ -48,6 +54,7 @@ export const ServerLifecycleEventsLive = Layer.effect(
       get stream() {
         return Stream.fromPubSub(pubsub);
       },
+      subscribe: PubSub.subscribe(pubsub),
     } satisfies ServerLifecycleEventsShape;
   }),
 );

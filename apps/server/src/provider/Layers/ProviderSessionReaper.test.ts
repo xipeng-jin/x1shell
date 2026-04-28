@@ -149,6 +149,7 @@ describe("ProviderSessionReaper", () => {
       readEvents: () => Stream.empty,
       dispatch: () => unsupported(),
       streamDomainEvents: Stream.empty,
+      subscribeDomainEvents: Effect.die("unused"),
     };
 
     const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(

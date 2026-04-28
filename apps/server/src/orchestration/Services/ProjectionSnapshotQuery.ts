@@ -13,6 +13,7 @@ import type {
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
   OrchestrationThread,
+  OrchestrationThreadDetailSnapshot,
   OrchestrationThreadShell,
   ProjectId,
   ThreadId,
@@ -101,6 +102,13 @@ export interface ProjectionSnapshotQueryShape {
 
   /**
    * Read a single active thread detail snapshot by id.
+   */
+  readonly getThreadDetailSnapshotById: (
+    threadId: ThreadId,
+  ) => Effect.Effect<Option.Option<OrchestrationThreadDetailSnapshot>, ProjectionRepositoryError>;
+
+  /**
+   * Read a single active thread detail by id.
    */
   readonly getThreadDetailById: (
     threadId: ThreadId,
