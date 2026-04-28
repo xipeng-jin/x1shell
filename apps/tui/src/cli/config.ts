@@ -1,4 +1,5 @@
 import os from "node:os";
+import { createHash } from "node:crypto";
 import path from "node:path";
 
 export interface TuiPaths {
@@ -27,13 +28,15 @@ export interface CliConfig {
 }
 
 export interface AttachConfig {
-  readonly mode: "none" | "remote" | "local";
+  readonly mode: "remote" | "local-managed";
   readonly url?: string;
   readonly bearerStdin: boolean;
   readonly credentialStdin: boolean;
   readonly baseDir: string;
+  readonly explicitBaseDir: boolean;
   readonly devUrl?: string;
   readonly serverEntry?: string;
+  readonly newServer: boolean;
 }
 
 export function resolveCliConfig(
@@ -50,10 +53,23 @@ export function resolveCliConfig(
   const theme = readFlag(args, "--theme") ?? readEnvString(env.X1SHELL_THEME);
   const attachUrl = readFlag(args, "--attach");
   validateAttachArgs(args, attachUrl);
-  const baseDir =
-    readFlag(args, "--base-dir") ??
-    readEnvString(env.T3CODE_HOME) ??
-    path.join(homeDir(env), ".t3");
+  const cliBaseDir = readFlag(args, "--base-dir");
+  const envBaseDir = readEnvString(env.T3CODE_HOME);
+  const explicitBaseDir = cliBaseDir ?? envBaseDir;
+  const requestedNewServer = hasFlag(args, "--new-server");
+  const defaultServerBaseDir = envBaseDir ?? path.join(homeDir(env), ".t3");
+  if (requestedNewServer && cliBaseDir && sameResolvedPath(cliBaseDir, defaultServerBaseDir, env)) {
+    throw new Error(
+      "--new-server requires an isolated --base-dir; the default server state root cannot be reused.",
+    );
+  }
+  const baseDir = requestedNewServer
+    ? resolveNewServerBaseDir({
+        explicitBaseDir: cliBaseDir,
+        cwd: env.PWD ?? process.cwd(),
+        dataDir: paths.dataDir,
+      })
+    : (explicitBaseDir ?? defaultServerBaseDir);
   const devUrl = readFlag(args, "--dev-url");
   const serverEntry = readFlag(args, "--server-entry") ?? readEnvString(env.X1SHELL_SERVER_ENTRY);
   if (serverEntry && !path.isAbsolute(serverEntry)) {
@@ -63,13 +79,15 @@ export function resolveCliConfig(
   return {
     paths,
     attach: {
-      mode: attachUrl ? "remote" : "local",
+      mode: attachUrl ? "remote" : "local-managed",
       ...(attachUrl ? { url: attachUrl } : {}),
       bearerStdin: hasFlag(args, "--attach-bearer-stdin"),
       credentialStdin: hasFlag(args, "--attach-credential-stdin"),
       baseDir,
+      explicitBaseDir: explicitBaseDir !== undefined,
       ...(devUrl ? { devUrl } : {}),
       ...(serverEntry ? { serverEntry } : {}),
+      newServer: requestedNewServer,
     },
     headless: {
       enabled: headlessEnabled,
@@ -143,9 +161,37 @@ function collectPositionalArgs(args: readonly string[]): string[] {
 }
 
 function isBooleanFlag(arg: string): boolean {
-  return ["--headless", "--verbose", "--attach-bearer-stdin", "--attach-credential-stdin"].includes(
-    arg,
-  );
+  return [
+    "--headless",
+    "--verbose",
+    "--attach-bearer-stdin",
+    "--attach-credential-stdin",
+    "--new-server",
+  ].includes(arg);
+}
+
+function resolveNewServerBaseDir(input: {
+  readonly explicitBaseDir: string | undefined;
+  readonly cwd: string;
+  readonly dataDir: string;
+}): string {
+  if (input.explicitBaseDir) return input.explicitBaseDir;
+  const resolvedCwd = path.resolve(input.cwd);
+  const basename = path.basename(resolvedCwd).replace(/[^A-Za-z0-9._-]+/g, "-") || "workspace";
+  const digest = createHash("sha256").update(resolvedCwd).digest("hex").slice(0, 12);
+  return path.join(input.dataDir, "servers", `${basename}-${digest}`);
+}
+
+function sameResolvedPath(left: string, right: string, env: NodeJS.ProcessEnv): boolean {
+  return path.resolve(expandHome(left, env)) === path.resolve(expandHome(right, env));
+}
+
+function expandHome(value: string, env: NodeJS.ProcessEnv): string {
+  if (value === "~") return homeDir(env);
+  if (value.startsWith("~/") || value.startsWith("~\\")) {
+    return path.join(homeDir(env), value.slice(2));
+  }
+  return value;
 }
 
 export function resolveTuiPaths(env: NodeJS.ProcessEnv = process.env): TuiPaths {

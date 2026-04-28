@@ -6,12 +6,12 @@ import { createRoot } from "@opentui/react";
 import { App } from "./app/App.js";
 import { resolveCliConfig } from "./cli/config.js";
 import { readPreferences } from "./cli/preferences.js";
-import {
-  resolveBearerAttachTarget,
-  resolveBootstrapAttachTarget,
-  resolveLocalAttachTarget,
-} from "./runtime/attach.js";
+import { resolveBearerAttachTarget, resolveBootstrapAttachTarget } from "./runtime/attach.js";
 import { createTuiConnectionController } from "./runtime/connection.js";
+import {
+  startLocalManagedSupervisor,
+  type LocalManagedSupervisor,
+} from "./runtime/localManaged.js";
 import { createLogger, safeOutputUnknown } from "./runtime/log.js";
 import {
   captureProcessListeners,
@@ -56,7 +56,17 @@ async function runHeadless(
 ): Promise<void> {
   const theme = resolveTheme(config.theme ?? preferences.theme);
   const serverStore = createServerConfigStore();
-  const controller = await maybeCreateAttachController(config, serverStore);
+  const localSupervisor = await maybeStartLocalSupervisor(config, logger).catch((error) => {
+    serverStore.setConnection("error", safeOutputUnknown(error));
+    return null;
+  });
+  const controller = await maybeCreateAttachController(config, serverStore, localSupervisor).catch(
+    (error) => {
+      serverStore.setConnection("error", safeOutputUnknown(error));
+      return null;
+    },
+  );
+  const unsubscribeRestart = localSupervisor?.onRestarted(() => controller?.reconnect());
   await controller?.connect().catch((error) => {
     serverStore.setConnection("error", safeOutputUnknown(error));
   });
@@ -84,7 +94,9 @@ async function runHeadless(
     await writeFile(config.headless.framePath, frame, "utf8");
     logger.info("headless frame written", { framePath: config.headless.framePath });
   } finally {
+    unsubscribeRestart?.();
     await controller?.dispose();
+    await localSupervisor?.stop();
     root?.unmount();
     setup?.renderer.destroy();
   }
@@ -102,10 +114,17 @@ async function runInteractive(
   let shuttingDown = false;
   const interruptRequestToken = 0;
   const serverStore = createServerConfigStore();
-  const controller = await maybeCreateAttachController(config, serverStore).catch((error) => {
+  const localSupervisor = await maybeStartLocalSupervisor(config, logger).catch((error) => {
     serverStore.setConnection("error", safeOutputUnknown(error));
     return null;
   });
+  const controller = await maybeCreateAttachController(config, serverStore, localSupervisor).catch(
+    (error) => {
+      serverStore.setConnection("error", safeOutputUnknown(error));
+      return null;
+    },
+  );
+  const unsubscribeRestart = localSupervisor?.onRestarted(() => controller?.reconnect());
 
   const render = () => {
     root.render(
@@ -124,7 +143,9 @@ async function runInteractive(
     shuttingDown = true;
 
     try {
+      unsubscribeRestart?.();
       await controller?.dispose();
+      await localSupervisor?.stop();
     } catch (disposeError) {
       logger.error("failed to dispose TUI connection", disposeError);
     }
@@ -189,16 +210,11 @@ async function runInteractive(
 async function maybeCreateAttachController(
   config: ReturnType<typeof resolveCliConfig>,
   serverStore: ReturnType<typeof createServerConfigStore>,
+  localSupervisor: LocalManagedSupervisor | null | undefined,
 ) {
-  if (config.attach.mode === "local") {
-    if (!config.attach.serverEntry) {
-      return null;
-    }
-    const target = await resolveLocalAttachTarget({
-      baseDir: config.attach.baseDir,
-      ...(config.attach.devUrl ? { devUrl: config.attach.devUrl } : {}),
-      serverEntry: config.attach.serverEntry,
-    });
+  if (config.attach.mode === "local-managed") {
+    if (!localSupervisor) return null;
+    const target = localSupervisor.target;
     serverStore.setAuth("owner");
     return createTuiConnectionController({ target, store: serverStore });
   }
@@ -214,6 +230,23 @@ async function maybeCreateAttachController(
     : await resolveBearerAttachTarget({ baseUrl: config.attach.url, bearerToken: secret });
   serverStore.setAuth(config.attach.credentialStdin ? "bootstrap" : "bearer");
   return createTuiConnectionController({ target, store: serverStore });
+}
+
+async function maybeStartLocalSupervisor(
+  config: ReturnType<typeof resolveCliConfig>,
+  logger: ReturnType<typeof createLogger>,
+): Promise<LocalManagedSupervisor | null> {
+  if (config.attach.mode !== "local-managed") return null;
+  if (config.headless.enabled && !config.attach.serverEntry && !config.attach.newServer)
+    return null;
+  return startLocalManagedSupervisor({
+    baseDir: config.attach.baseDir,
+    ...(config.attach.devUrl ? { devUrl: config.attach.devUrl } : {}),
+    ...(config.attach.serverEntry ? { serverEntry: config.attach.serverEntry } : {}),
+    newServer: config.attach.newServer,
+    cwd: process.cwd(),
+    logger,
+  });
 }
 
 async function readStdinSecret(): Promise<string> {

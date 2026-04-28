@@ -229,14 +229,18 @@ describe("attach runtime", () => {
       issueLocalOwnerBearerSession({
         baseDir: "/tmp/t3",
         devUrl: "http://localhost:5173",
-        serverEntry: "/repo/apps/server/dist/bin.mjs",
+        serverCommand: {
+          executable: "/usr/bin/node",
+          entryArgs: ["/repo/apps/server/dist/bin.mjs"],
+        },
         execFile: execMock as never,
       }),
     ).resolves.toBe("bearer-secret");
 
     expect(execMock).toHaveBeenCalledWith(
-      "/repo/apps/server/dist/bin.mjs",
+      "/usr/bin/node",
       [
+        "/repo/apps/server/dist/bin.mjs",
         "auth",
         "session",
         "issue",

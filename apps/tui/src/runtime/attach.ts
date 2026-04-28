@@ -33,8 +33,14 @@ export interface AttachRuntimeOptions {
 export interface LocalAttachOptions extends AttachRuntimeOptions {
   readonly baseDir: string;
   readonly devUrl?: string;
-  readonly serverEntry: string;
+  readonly serverEntry?: string;
+  readonly serverCommand?: ServerCommandSpec;
   readonly execFile?: typeof execFile;
+}
+
+export interface ServerCommandSpec {
+  readonly executable: string;
+  readonly entryArgs: readonly string[];
 }
 
 export interface ServerStatePaths {
@@ -275,7 +281,9 @@ export async function compareBeforeDeleteRuntimeState(
 }
 
 export async function issueLocalOwnerBearerSession(input: LocalAttachOptions): Promise<string> {
+  const command = resolveServerCommand(input);
   const args = [
+    ...command.entryArgs,
     "auth",
     "session",
     "issue",
@@ -288,7 +296,7 @@ export async function issueLocalOwnerBearerSession(input: LocalAttachOptions): P
   ];
   const { stdout } = input.execFile
     ? await new Promise<{ stdout: string | Buffer }>((resolve, reject) => {
-        input.execFile?.(input.serverEntry, args, { windowsHide: true }, (error, stdout) => {
+        input.execFile?.(command.executable, args, { windowsHide: true }, (error, stdout) => {
           if (error) {
             reject(sanitizeLocalAuthCommandError(error));
             return;
@@ -296,7 +304,7 @@ export async function issueLocalOwnerBearerSession(input: LocalAttachOptions): P
           resolve({ stdout });
         });
       })
-    : await execFileAsync(input.serverEntry, args, { windowsHide: true }).catch(
+    : await execFileAsync(command.executable, args, { windowsHide: true }).catch(
         (error: unknown) => {
           throw sanitizeLocalAuthCommandError(error);
         },
@@ -306,6 +314,12 @@ export async function issueLocalOwnerBearerSession(input: LocalAttachOptions): P
     throw new Error("Local owner session command did not return a bearer token.");
   }
   return token;
+}
+
+function resolveServerCommand(input: LocalAttachOptions): ServerCommandSpec {
+  if (input.serverCommand) return input.serverCommand;
+  if (input.serverEntry) return { executable: input.serverEntry, entryArgs: [] };
+  throw new Error("A deterministic server command is required for local owner auth.");
 }
 
 function sanitizeLocalAuthCommandError(error: unknown): Error {

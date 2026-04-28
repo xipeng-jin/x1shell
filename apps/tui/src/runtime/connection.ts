@@ -106,6 +106,7 @@ export function createTuiConnectionController(input: {
       },
     });
     current = connection;
+    const firstShellSnapshot = deferred<void>();
     unsubscribeConfig = connection.client.server.subscribeConfig((event) => {
       input.store.applyConfigEvent(event);
     });
@@ -125,11 +126,20 @@ export function createTuiConnectionController(input: {
       input.store.applyLifecycleEvent(event);
     });
     unsubscribeShell = connection.client.orchestration.subscribeShell((item) => {
+      if (disposed || current !== connection || generation !== connectionGeneration) {
+        return;
+      }
       input.store.applyShellItem(item);
       if (item.kind === "snapshot") {
         input.store.setConnection("connected");
+        firstShellSnapshot.resolve();
       }
     });
+    await withTimeout(
+      firstShellSnapshot.promise,
+      15_000,
+      "Timed out waiting for initial shell snapshot.",
+    );
   };
 
   const scheduleReconnect = () => {
@@ -152,4 +162,29 @@ export function createTuiConnectionController(input: {
       await disposeCurrent();
     },
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((innerResolve, innerReject) => {
+    resolve = innerResolve;
+    reject = innerReject;
+  });
+  return { promise, resolve, reject };
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+        timeout.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }

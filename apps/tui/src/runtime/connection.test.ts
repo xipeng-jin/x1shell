@@ -210,6 +210,47 @@ describe("TUI connection runtime", () => {
     await controller.dispose();
   });
 
+  it("does not resolve connect until the first shell snapshot is applied", async () => {
+    const store = createServerConfigStore();
+    let shellListener: ((item: unknown) => void) | undefined;
+    const controller = createTuiConnectionController({
+      target: attachTarget(),
+      store,
+      createConnection: () =>
+        ({
+          client: {
+            server: {
+              getConfig: () => Promise.resolve(serverConfig("default-provider")),
+              subscribeConfig: () => () => undefined,
+              subscribeLifecycle: () => () => undefined,
+            },
+            orchestration: {
+              subscribeShell: (listener: (item: unknown) => void) => {
+                shellListener = listener;
+                return () => undefined;
+              },
+            },
+          },
+          transport: {},
+          dispose: async () => undefined,
+        }) as never,
+    });
+
+    let resolved = false;
+    const connectPromise = controller.connect().then(() => {
+      resolved = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(resolved).toBe(false);
+
+    shellListener?.({ kind: "snapshot", snapshot: shellSnapshot(1, "thread-a") });
+    await connectPromise;
+    expect(resolved).toBe(true);
+    expect(store.getSnapshot().connection).toBe("connected");
+
+    await controller.dispose();
+  });
+
   it("ignores stale getConfig results from a disposed connection after reconnect", async () => {
     const store = createServerConfigStore();
     const staleConfig = deferred<unknown>();
