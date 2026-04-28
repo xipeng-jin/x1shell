@@ -337,7 +337,7 @@ describe("TUI connection runtime", () => {
     expect(disposed).toEqual([0, 1]);
   });
 
-  it("surfaces subscription errors through the status store", async () => {
+  it("surfaces subscription errors and enters reconnecting status", async () => {
     const store = createServerConfigStore();
     let reportError: ((metadata: { readonly message: string }) => void) | undefined;
     const controller = createTuiConnectionController({
@@ -365,9 +365,46 @@ describe("TUI connection runtime", () => {
     reportError?.({ message: "Authorization: Bearer secret-token failed" });
 
     expect(store.getSnapshot()).toMatchObject({
-      connection: "error",
+      connection: "reconnecting",
       error: "Authorization: [REDACTED] failed",
     });
+    await controller.dispose();
+  });
+
+  it("coalesces repeated subscription errors into one scheduled reconnect", async () => {
+    const store = createServerConfigStore();
+    const disposed: number[] = [];
+    let reportError: ((metadata: { readonly message: string }) => void) | undefined;
+    let connectionCount = 0;
+    const controller = createTuiConnectionController({
+      target: attachTarget(),
+      store,
+      createConnection: (_provider, options) => {
+        const connectionId = connectionCount;
+        connectionCount += 1;
+        reportError = options?.onSubscriptionError;
+        return fakeConnection({
+          dispose: () => disposed.push(connectionId),
+          shellSnapshot:
+            connectionId === 0 ? shellSnapshot(1, "thread-a") : shellSnapshot(2, "thread-b"),
+        });
+      },
+    });
+
+    await controller.connect();
+    reportError?.({ message: "first subscription error" });
+    reportError?.({ message: "second subscription error" });
+    reportError?.({ message: "third subscription error" });
+
+    await waitFor(() => {
+      expect(store.getSnapshot().shell?.snapshotSequence).toBe(2);
+    });
+
+    expect(connectionCount).toBe(2);
+    expect(disposed).toEqual([0]);
+
+    await controller.dispose();
+    expect(disposed).toEqual([0, 1]);
   });
 
   it("subscribes active thread, unsubscribes on selection change, and resubscribes on reconnect", async () => {

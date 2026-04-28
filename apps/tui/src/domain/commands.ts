@@ -2,13 +2,17 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  type ApprovalRequestId,
   MessageId,
   ThreadId,
   type ClientOrchestrationCommand,
   type ModelSelection,
   type OrchestrationProjectShell,
+  type OrchestrationThread,
   type OrchestrationThreadShell,
   type ProjectId,
+  type ProviderApprovalDecision,
+  type TurnId,
 } from "@t3tools/contracts";
 import { createModelSelection, resolveModelSlugForProvider } from "@t3tools/shared/model";
 
@@ -16,6 +20,7 @@ type ClientThreadTurnStartCommand = Extract<
   ClientOrchestrationCommand,
   { readonly type: "thread.turn.start" }
 >;
+type ThreadLike = OrchestrationThreadShell | OrchestrationThread;
 
 export function buildExistingThreadTurnStart(input: {
   readonly thread: OrchestrationThreadShell;
@@ -38,6 +43,85 @@ export function buildExistingThreadTurnStart(input: {
     interactionMode: input.thread.interactionMode,
     createdAt,
   };
+}
+
+export function buildThreadTurnInterrupt(input: {
+  readonly threadId: ThreadId;
+  readonly turnId?: TurnId | null;
+  readonly now?: string;
+}): Extract<ClientOrchestrationCommand, { readonly type: "thread.turn.interrupt" }> {
+  return {
+    type: "thread.turn.interrupt",
+    commandId: newCommandId(),
+    threadId: input.threadId,
+    ...(input.turnId ? { turnId: input.turnId } : {}),
+    createdAt: input.now ?? new Date().toISOString(),
+  };
+}
+
+export function buildThreadApprovalResponse(input: {
+  readonly threadId: ThreadId;
+  readonly requestId: ApprovalRequestId;
+  readonly decision: ProviderApprovalDecision;
+  readonly now?: string;
+}): Extract<ClientOrchestrationCommand, { readonly type: "thread.approval.respond" }> {
+  return {
+    type: "thread.approval.respond",
+    commandId: newCommandId(),
+    threadId: input.threadId,
+    requestId: input.requestId,
+    decision: input.decision,
+    createdAt: input.now ?? new Date().toISOString(),
+  };
+}
+
+export function buildThreadUserInputResponse(input: {
+  readonly threadId: ThreadId;
+  readonly requestId: ApprovalRequestId;
+  readonly answers: Record<string, unknown>;
+  readonly now?: string;
+}): Extract<ClientOrchestrationCommand, { readonly type: "thread.user-input.respond" }> {
+  return {
+    type: "thread.user-input.respond",
+    commandId: newCommandId(),
+    threadId: input.threadId,
+    requestId: input.requestId,
+    answers: input.answers,
+    createdAt: input.now ?? new Date().toISOString(),
+  };
+}
+
+export function buildThreadSessionStop(input: {
+  readonly threadId: ThreadId;
+  readonly now?: string;
+}): Extract<ClientOrchestrationCommand, { readonly type: "thread.session.stop" }> {
+  return {
+    type: "thread.session.stop",
+    commandId: newCommandId(),
+    threadId: input.threadId,
+    createdAt: input.now ?? new Date().toISOString(),
+  };
+}
+
+export function buildThreadArchive(input: {
+  readonly threadId: ThreadId;
+}): Extract<ClientOrchestrationCommand, { readonly type: "thread.archive" }> {
+  return { type: "thread.archive", commandId: newCommandId(), threadId: input.threadId };
+}
+
+export function buildThreadUnarchive(input: {
+  readonly threadId: ThreadId;
+}): Extract<ClientOrchestrationCommand, { readonly type: "thread.unarchive" }> {
+  return { type: "thread.unarchive", commandId: newCommandId(), threadId: input.threadId };
+}
+
+export function canArchiveThread(thread: ThreadLike | null | undefined): boolean {
+  if (!thread || thread.archivedAt) return false;
+  return !(thread.session?.status === "running" && thread.session.activeTurnId != null);
+}
+
+export function canStopThreadSession(thread: ThreadLike | null | undefined): boolean {
+  return Boolean(thread?.session && thread.session.status !== "stopped");
 }
 
 export function buildNewThreadTurnStart(input: {

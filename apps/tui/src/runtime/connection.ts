@@ -13,6 +13,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import type { AttachTarget } from "./attach.js";
 import { safeOutputText } from "./log.js";
+import { createStreamBatcher, type StreamBatcher } from "./streamBatcher.js";
 import type { createServerConfigStore } from "../state/serverConfigStore.js";
 import type { createOrchestrationStore } from "../state/orchestrationStore.js";
 import type { createThreadDetailStore } from "../state/threadDetailStore.js";
@@ -22,6 +23,9 @@ import type { ThreadId } from "@t3tools/contracts";
 type ServerConfigStore = ReturnType<typeof createServerConfigStore>;
 type OrchestrationStore = ReturnType<typeof createOrchestrationStore>;
 type ThreadDetailStore = ReturnType<typeof createThreadDetailStore>;
+
+const INITIAL_RECONNECT_DELAY_MS = 250;
+const MAX_RECONNECT_DELAY_MS = 5_000;
 
 export interface TuiWsConnectionOptions {
   readonly lifecycle?: WsProtocolLifecycleHandlers;
@@ -80,15 +84,32 @@ export function createTuiConnectionController(input: {
   let unsubscribeLifecycle: (() => void) | null = null;
   let unsubscribeShell: (() => void) | null = null;
   let unsubscribeThread: (() => void) | null = null;
+  let shellBatcher: StreamBatcher<Parameters<OrchestrationStore["applyShellItem"]>[0]> | null =
+    null;
+  let threadBatcher: StreamBatcher<Parameters<ThreadDetailStore["applyThreadItem"]>[1]> | null =
+    null;
   let subscribedThreadId: ThreadId | null = null;
   let subscribedThreadGeneration: number | null = null;
   let activeThreadId: ThreadId | null = null;
   let reconnectChain: Promise<void> = Promise.resolve();
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
   let disposed = false;
   let connectionGeneration = 0;
 
+  const clearReconnectTimer = () => {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  };
+
   const disposeCurrent = async () => {
     connectionGeneration += 1;
+    shellBatcher?.dispose();
+    threadBatcher?.dispose();
+    shellBatcher = null;
+    threadBatcher = null;
     unsubscribeShell?.();
     releaseThreadSubscription({ evict: false });
     unsubscribeLifecycle?.();
@@ -98,6 +119,21 @@ export function createTuiConnectionController(input: {
     unsubscribeConfig = null;
     await current?.dispose();
     current = null;
+  };
+
+  const handleSubscriptionIssue = (
+    generation: number,
+    kind: "disconnect" | "error",
+    metadata: { readonly message: string },
+  ) => {
+    if (disposed || generation !== connectionGeneration) return;
+    input.store.setConnection("reconnecting", safeOutputText(metadata.message));
+    if (kind === "disconnect") {
+      input.options?.onSubscriptionDisconnect?.(metadata);
+    } else {
+      input.options?.onSubscriptionError?.(metadata);
+    }
+    void scheduleReconnect({ generation });
   };
 
   const connectFresh = async (status: "connecting" | "reconnecting") => {
@@ -111,17 +147,20 @@ export function createTuiConnectionController(input: {
     const connection = connectionFactory(input.target.webSocketUrlProvider, {
       ...input.options,
       onSubscriptionDisconnect: (metadata) => {
-        input.store.setConnection("reconnecting", safeOutputText(metadata.message));
-        input.options?.onSubscriptionDisconnect?.(metadata);
-        void scheduleReconnect();
+        handleSubscriptionIssue(generation, "disconnect", metadata);
       },
       onSubscriptionError: (metadata) => {
-        input.store.setConnection("error", safeOutputText(metadata.message));
-        input.options?.onSubscriptionError?.(metadata);
+        handleSubscriptionIssue(generation, "error", metadata);
       },
     });
     current = connection;
     const firstShellSnapshot = deferred<void>();
+    shellBatcher = createStreamBatcher({
+      onFlush: (items) => {
+        input.orchestrationStore?.applyShellItems(items);
+        reconcileActiveThreadSubscription(connection, generation);
+      },
+    });
     unsubscribeConfig = connection.client.server.subscribeConfig((event) => {
       input.store.applyConfigEvent(event);
     });
@@ -145,9 +184,10 @@ export function createTuiConnectionController(input: {
         return;
       }
       input.store.applyShellItem(item);
-      input.orchestrationStore?.applyShellItem(item);
-      reconcileActiveThreadSubscription(connection, generation);
+      shellBatcher?.push(item);
       if (item.kind === "snapshot") {
+        shellBatcher?.flush();
+        reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
         input.store.setConnection("connected");
         firstShellSnapshot.resolve();
       }
@@ -182,19 +222,26 @@ export function createTuiConnectionController(input: {
     });
     subscribedThreadId = threadId;
     subscribedThreadGeneration = generation;
+    threadBatcher?.dispose();
+    threadBatcher = createStreamBatcher({
+      onFlush: (items) => input.threadDetailStore?.applyThreadItems(threadId, items),
+    });
     unsubscribeThread = connection.client.orchestration.subscribeThread({ threadId }, (item) => {
       if (disposed || current !== connection || generation !== connectionGeneration) return;
       if (isSnapshotRequiredThreadEvent(item)) {
         subscribeActiveThread(connection, generation, threadId, { force: true });
         return;
       }
-      input.threadDetailStore?.applyThreadItem(threadId, item);
+      threadBatcher?.push(item);
+      if (item.kind === "snapshot") threadBatcher?.flush();
     });
   };
 
   const releaseThreadSubscription = (options: { readonly evict: boolean }) => {
     const previousThreadId = subscribedThreadId;
     unsubscribeThread?.();
+    threadBatcher?.dispose();
+    threadBatcher = null;
     unsubscribeThread = null;
     subscribedThreadId = null;
     subscribedThreadGeneration = null;
@@ -216,13 +263,42 @@ export function createTuiConnectionController(input: {
     subscribeActiveThread(connection, generation, selectedThreadId);
   };
 
-  const scheduleReconnect = () => {
+  const scheduleReconnect = (
+    options: { readonly immediate?: boolean; readonly generation?: number } = {},
+  ) => {
     if (disposed) {
       return Promise.resolve();
     }
+    if (options.generation !== undefined && options.generation !== connectionGeneration) {
+      return reconnectChain;
+    }
+    if (reconnectTimer) {
+      return reconnectChain;
+    }
+    const delayMs = options.immediate ? 0 : reconnectDelayMs;
+    reconnectDelayMs = Math.min(reconnectDelayMs * 2, MAX_RECONNECT_DELAY_MS);
     reconnectChain = reconnectChain
-      .then(() => connectFresh("reconnecting"))
+      .then(
+        () =>
+          new Promise<void>((resolve) => {
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              resolve();
+            }, delayMs);
+            reconnectTimer.unref?.();
+          }),
+      )
+      .then(() => {
+        if (
+          disposed ||
+          (options.generation !== undefined && options.generation !== connectionGeneration)
+        ) {
+          return undefined;
+        }
+        return connectFresh("reconnecting");
+      })
       .catch((error) => {
+        clearReconnectTimer();
         input.store.setConnection("error", safeOutputText(String(error)));
       });
     return reconnectChain;
@@ -230,7 +306,7 @@ export function createTuiConnectionController(input: {
 
   return {
     connect: () => connectFresh("connecting"),
-    reconnect: scheduleReconnect,
+    reconnect: () => scheduleReconnect({ immediate: true }),
     setActiveThread: (threadId) => {
       activeThreadId = threadId;
       if (current && threadId) {
@@ -245,6 +321,7 @@ export function createTuiConnectionController(input: {
     },
     dispose: async () => {
       disposed = true;
+      clearReconnectTimer();
       await disposeCurrent();
     },
   };

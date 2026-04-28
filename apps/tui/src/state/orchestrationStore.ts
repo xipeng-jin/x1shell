@@ -56,6 +56,13 @@ export function createOrchestrationStore(initial?: Partial<TuiShellState>) {
       const next = applyShellItem(state, item);
       if (next !== state) setState(next);
     },
+    applyShellItems: (items: readonly OrchestrationShellStreamItem[]) => {
+      let next = state;
+      for (const item of items) {
+        next = applyShellItem(next, item);
+      }
+      if (next !== state) setState(next);
+    },
     selectThread: (threadId: ThreadId) => {
       const thread = state.threads.find((entry) => entry.id === threadId);
       if (!thread) return;
@@ -108,6 +115,9 @@ export function applyShellItem(
   item: OrchestrationShellStreamItem,
 ): TuiShellState {
   if (item.kind === "snapshot") {
+    if (item.snapshot.snapshotSequence < state.lastAppliedSequence) {
+      return state;
+    }
     return fromShellSnapshot(item.snapshot, state);
   }
   if (item.sequence <= state.lastAppliedSequence) {
@@ -237,9 +247,16 @@ function upsertById<T extends { readonly id: string; readonly updatedAt: string 
   values: readonly T[],
   value: T,
 ): T[] {
+  const existing = values.find((entry) => entry.id === value.id);
+  if (existing && structuralEqual(existing, value)) return values as T[];
   const next = values.filter((entry) => entry.id !== value.id);
   next.push(value);
   return next.toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function structuralEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function omitRecordKey<T>(record: Readonly<Record<string, T>>, key: string): Record<string, T> {

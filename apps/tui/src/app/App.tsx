@@ -3,15 +3,29 @@ import type React from "react";
 import { useMemo, useState } from "react";
 import type { ClientOrchestrationCommand, ProjectId, ThreadId } from "@t3tools/contracts";
 import type { TuiPaths } from "../cli/config.js";
-import { buildExistingThreadTurnStart, buildNewThreadTurnStart } from "../domain/commands.js";
 import {
-  displayActivity,
-  displayMessage,
+  buildExistingThreadTurnStart,
+  buildNewThreadTurnStart,
+  buildThreadApprovalResponse,
+  buildThreadArchive,
+  buildThreadSessionStop,
+  buildThreadTurnInterrupt,
+  buildThreadUnarchive,
+  buildThreadUserInputResponse,
+  canArchiveThread,
+  canStopThreadSession,
+} from "../domain/commands.js";
+import {
+  createConversationDisplayCache,
   displayProject,
-  displayProposedPlan,
   displayText,
   displayThread,
 } from "../domain/display.js";
+import {
+  buildUserInputAnswers,
+  derivePendingApprovals,
+  derivePendingUserInputs,
+} from "../domain/pendingActions.js";
 import type { TuiServerStatusSnapshot } from "../state/serverConfigStore.js";
 import type { TuiShellState } from "../state/orchestrationStore.js";
 import type { ThreadDetailState } from "../state/threadDetailStore.js";
@@ -50,13 +64,99 @@ export function App(props: {
   const draft = draftProjectId ? (shell.draftByProjectId[draftProjectId] ?? "") : "";
   const [localDraft, setLocalDraft] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [customInputAnswer, setCustomInputAnswer] = useState("");
+  const [selectedInputOptions, setSelectedInputOptions] = useState<
+    Record<string, readonly number[]>
+  >({});
   const composerText = draftProjectId ? draft : localDraft;
-  const timeline = useMemo(() => buildTimeline(activeDetail), [activeDetail]);
+  const displayCache = useMemo(() => createConversationDisplayCache({ windowSize: 40 }), []);
+  const timeline = useMemo(
+    () => displayCache.buildTimeline(activeDetail),
+    [activeDetail, displayCache],
+  );
+  const pendingApprovals = useMemo(
+    () => derivePendingApprovals(activeDetail?.activities ?? []),
+    [activeDetail?.activities],
+  );
+  const pendingUserInputs = useMemo(
+    () => derivePendingUserInputs(activeDetail?.activities ?? []),
+    [activeDetail?.activities],
+  );
+  const shellAllowsPendingApproval = activeThreadShell?.hasPendingApprovals ?? true;
+  const shellAllowsPendingUserInput = activeThreadShell?.hasPendingUserInput ?? true;
+  const activePendingApproval = shellAllowsPendingApproval ? (pendingApprovals[0] ?? null) : null;
+  const activePendingUserInput = shellAllowsPendingUserInput
+    ? (pendingUserInputs[0] ?? null)
+    : null;
 
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") {
-      props.onRequestExit();
+      if (activeThreadHeader?.session?.status === "running" && activeThreadHeader.id) {
+        void props.onSubmitCommand?.(
+          buildThreadTurnInterrupt({
+            threadId: activeThreadHeader.id,
+            turnId: activeThreadHeader.session.activeTurnId,
+          }),
+        );
+      } else {
+        props.onRequestExit();
+      }
       return;
+    }
+    if (activePendingApproval && activeThreadHeader?.id && composerText.length === 0) {
+      const decision =
+        key.name === "y"
+          ? "accept"
+          : key.name === "s"
+            ? "acceptForSession"
+            : key.name === "n"
+              ? "decline"
+              : key.name === "c"
+                ? "cancel"
+                : null;
+      if (decision) {
+        void props.onSubmitCommand?.(
+          buildThreadApprovalResponse({
+            threadId: activeThreadHeader.id,
+            requestId: activePendingApproval.requestId,
+            decision,
+          }),
+        );
+        return;
+      }
+    }
+    if (activePendingUserInput && activeThreadHeader?.id) {
+      const activeQuestion = activePendingUserInput.questions[0];
+      if (/^[1-9]$/.test(key.name)) {
+        toggleUserInputOption(Number(key.name) - 1, activeQuestion?.id);
+        return;
+      }
+      if (key.name === "backspace") {
+        setCustomInputAnswer(customInputAnswer.slice(0, -1));
+        return;
+      }
+      if (key.name === "return" || key.name === "enter") {
+        const answers = buildUserInputAnswers({
+          pending: activePendingUserInput,
+          selectedOptions: selectedInputOptions,
+          customAnswer: customInputAnswer,
+          ...(activeQuestion ? { questionIds: new Set([activeQuestion.id]) } : {}),
+        });
+        void props.onSubmitCommand?.(
+          buildThreadUserInputResponse({
+            threadId: activeThreadHeader.id,
+            requestId: activePendingUserInput.requestId,
+            answers,
+          }),
+        );
+        setCustomInputAnswer("");
+        setSelectedInputOptions({});
+        return;
+      }
+      if (!key.ctrl && !key.meta && key.sequence && key.sequence.length === 1) {
+        setCustomInputAnswer(customInputAnswer + key.sequence);
+        return;
+      }
     }
     if (key.name === "q" && composerText.length === 0) {
       props.onRequestExit();
@@ -72,6 +172,18 @@ export function App(props: {
     }
     if (key.ctrl && key.name === "n") {
       props.onNewThread?.();
+      return;
+    }
+    if (composerText.length === 0 && key.name === "s" && canStopThreadSession(activeThreadHeader)) {
+      void props.onSubmitCommand?.(buildThreadSessionStop({ threadId: activeThreadHeader!.id }));
+      return;
+    }
+    if (composerText.length === 0 && key.name === "a" && activeThreadHeader?.id) {
+      if (activeThreadHeader.archivedAt) {
+        void props.onSubmitCommand?.(buildThreadUnarchive({ threadId: activeThreadHeader.id }));
+      } else if (canArchiveThread(activeThreadHeader)) {
+        void props.onSubmitCommand?.(buildThreadArchive({ threadId: activeThreadHeader.id }));
+      }
       return;
     }
     if (key.name === "backspace") {
@@ -113,6 +225,21 @@ export function App(props: {
     } catch (error) {
       setSubmitError(displayText(String(error)));
     }
+  }
+
+  function toggleUserInputOption(index: number, questionId: string | undefined) {
+    if (!questionId || !activePendingUserInput) return;
+    const question = activePendingUserInput.questions.find((entry) => entry.id === questionId);
+    if (!question || !question.options[index]) return;
+    setSelectedInputOptions((existing) => {
+      const current = existing[questionId] ?? [];
+      const next = question.multiSelect
+        ? current.includes(index)
+          ? current.filter((value) => value !== index)
+          : [...current, index]
+        : [index];
+      return { ...existing, [questionId]: next };
+    });
   }
 
   return (
@@ -164,17 +291,73 @@ export function App(props: {
       </box>
 
       <box
-        height={5}
+        height={activePendingApproval || activePendingUserInput ? 9 : 5}
         paddingLeft={2}
         paddingRight={2}
         border
         borderColor={props.theme.palette.border}
       >
-        <text fg={props.theme.palette.muted}>{`↑/↓ select | n new | enter send | q exits`}</text>
+        {activePendingApproval ? (
+          <PendingApprovalPanel approval={activePendingApproval} theme={props.theme} />
+        ) : activePendingUserInput ? (
+          <PendingUserInputPanel
+            pending={activePendingUserInput}
+            customAnswer={customInputAnswer}
+            selectedOptions={selectedInputOptions}
+            theme={props.theme}
+          />
+        ) : null}
+        <text
+          fg={props.theme.palette.muted}
+        >{`↑/↓ select | ^n new | ^c interrupt/exit | a archive | s stop | enter send | q exits`}</text>
         <text fg={props.theme.palette.muted}>{displayText(props.paths.configDir)}</text>
         <input focused value={composerText} placeholder="Message agent..." />
         {submitError ? <text fg={props.theme.palette.danger}>{submitError}</text> : null}
       </box>
+    </box>
+  );
+}
+
+function PendingApprovalPanel(props: {
+  approval: ReturnType<typeof derivePendingApprovals>[number];
+  theme: TuiTheme;
+}) {
+  return (
+    <box flexDirection="column">
+      <text
+        fg={props.theme.palette.accent}
+      >{`Approval: ${displayText(props.approval.requestKind)}`}</text>
+      {props.approval.detail ? (
+        <text fg={props.theme.palette.muted}>{displayText(props.approval.detail)}</text>
+      ) : null}
+      <text fg={props.theme.palette.muted}>y accept | s session | n decline | c cancel</text>
+    </box>
+  );
+}
+
+function PendingUserInputPanel(props: {
+  pending: ReturnType<typeof derivePendingUserInputs>[number];
+  selectedOptions: Readonly<Record<string, readonly number[]>>;
+  customAnswer: string;
+  theme: TuiTheme;
+}) {
+  const question = props.pending.questions[0];
+  if (!question) return null;
+  const selected = props.selectedOptions[question.id] ?? [];
+  return (
+    <box flexDirection="column">
+      <text fg={props.theme.palette.accent}>{displayText(question.header)}</text>
+      <text fg={props.theme.palette.text}>{displayText(question.question)}</text>
+      <text fg={props.theme.palette.muted}>
+        {question.options
+          .slice(0, 9)
+          .map(
+            (option, index) =>
+              `${index + 1}${selected.includes(index) ? "*" : ""}:${displayText(option.label)}`,
+          )
+          .join("  ")}
+      </text>
+      <text fg={props.theme.palette.muted}>{`custom: ${displayText(props.customAnswer)}`}</text>
     </box>
   );
 }
@@ -259,42 +442,6 @@ function ThreadHeader(props: {
         {`${display.provider}/${display.model} | ${display.session}${display.branch ? ` | ${display.branch}` : ""}`}
       </text>
     </box>
-  );
-}
-
-function buildTimeline(thread: NonNullable<ThreadDetailState["entries"][string]["thread"]> | null) {
-  if (!thread) return [];
-  const messages = thread.messages.map((message) => {
-    const display = displayMessage(message);
-    return {
-      kind: "message" as const,
-      key: `message:${message.id}`,
-      createdAt: message.createdAt,
-      role: display.role,
-      markdown: display.markdown,
-    };
-  });
-  const activities = thread.activities.map((activity) => {
-    const display = displayActivity(activity);
-    return {
-      kind: "activity" as const,
-      key: `activity:${activity.id}`,
-      createdAt: activity.createdAt,
-      text: `${display.kind}: ${display.summary}`,
-    };
-  });
-  const plans = thread.proposedPlans.map((plan) => {
-    const display = displayProposedPlan(plan);
-    return {
-      kind: "message" as const,
-      key: `plan:${plan.id}`,
-      createdAt: plan.createdAt,
-      role: "plan",
-      markdown: display.markdown,
-    };
-  });
-  return [...messages, ...activities, ...plans].toSorted((left, right) =>
-    left.createdAt.localeCompare(right.createdAt),
   );
 }
 

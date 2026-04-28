@@ -85,6 +85,52 @@ describe("TUI thread detail store", () => {
     expect(store.getSnapshot().entries["thread-a"]?.thread?.messages).toHaveLength(0);
   });
 
+  it("ignores stale thread snapshots after newer live events", () => {
+    const store = createThreadDetailStore();
+    store.applyThreadItem(
+      "thread-a" as never,
+      {
+        kind: "snapshot",
+        snapshot: { snapshotSequence: 5, thread: threadDetail("thread-a") },
+      } as never,
+    );
+    store.applyThreadItem(
+      "thread-a" as never,
+      {
+        kind: "event",
+        event: messageEvent(9, "thread-a", "fresh"),
+      } as never,
+    );
+    store.applyThreadItem(
+      "thread-a" as never,
+      {
+        kind: "snapshot",
+        snapshot: {
+          snapshotSequence: 6,
+          thread: Object.assign(threadDetail("thread-a"), {
+            messages: [
+              {
+                id: "message-stale",
+                role: "assistant",
+                text: "stale",
+                attachments: [],
+                turnId: null,
+                streaming: false,
+                createdAt: "2026-04-28T00:00:00.000Z",
+                updatedAt: "2026-04-28T00:00:00.000Z",
+              },
+            ],
+          }),
+        },
+      } as never,
+    );
+
+    expect(store.getSnapshot().entries["thread-a"]?.lastAppliedSequence).toBe(9);
+    expect(store.getSnapshot().entries["thread-a"]?.thread?.messages).toMatchObject([
+      { id: "message-9", text: "fresh" },
+    ]);
+  });
+
   it("accumulates streaming message deltas and preserves text on empty final events", () => {
     let state: ThreadDetailState = { entries: {} };
     state = applyThreadItem(
@@ -141,6 +187,66 @@ describe("TUI thread detail store", () => {
         streaming: false,
       },
     ]);
+  });
+
+  it("applies high-frequency batches with one emission and coalesced assistant deltas", () => {
+    const store = createThreadDetailStore();
+    let emissions = 0;
+    store.subscribe(() => {
+      emissions += 1;
+    });
+    store.applyThreadItem(
+      "thread-a" as never,
+      {
+        kind: "snapshot",
+        snapshot: { snapshotSequence: 5, thread: threadDetail("thread-a") },
+      } as never,
+    );
+    store.applyThreadItems(
+      "thread-a" as never,
+      [
+        {
+          kind: "event",
+          event: messageEvent(6, "thread-a", "hel", {
+            messageId: "message-stream",
+            role: "assistant",
+            streaming: true,
+          }),
+        },
+        {
+          kind: "event",
+          event: messageEvent(8, "thread-a", "lo", {
+            messageId: "message-stream",
+            role: "assistant",
+            streaming: true,
+          }),
+        },
+        {
+          kind: "event",
+          event: messageEvent(7, "thread-a", "stale", {
+            messageId: "message-stale",
+            role: "assistant",
+            streaming: true,
+          }),
+        },
+        {
+          kind: "event",
+          event: activityEvent(11, "thread-a", "Ran tool"),
+        },
+      ] as never,
+    );
+
+    expect(emissions).toBe(3);
+    expect(store.getSnapshot().entries["thread-a"]?.lastAppliedSequence).toBe(11);
+    expect(store.getSnapshot().entries["thread-a"]?.thread?.messages).toMatchObject([
+      {
+        id: "message-stream",
+        text: "hello",
+      },
+    ]);
+    expect(store.getSnapshot().entries["thread-a"]?.thread?.activities[0]?.summary).toBe(
+      "Ran tool",
+    );
   });
 
   it("does not locally reduce events that require a replacement snapshot", () => {

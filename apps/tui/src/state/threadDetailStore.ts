@@ -19,6 +19,7 @@ export interface ThreadDetailState {
 }
 
 export type ThreadDetailListener = (state: ThreadDetailState) => void;
+type ThreadEventItem = { readonly kind: "event"; readonly event: OrchestrationEvent };
 
 export function createThreadDetailStore(initial?: Partial<ThreadDetailState>) {
   let state: ThreadDetailState = { entries: {}, ...initial };
@@ -35,6 +36,15 @@ export function createThreadDetailStore(initial?: Partial<ThreadDetailState>) {
     },
     applyThreadItem: (threadId: ThreadId, item: OrchestrationThreadStreamItem) => {
       const next = applyThreadItem(state, threadId, item);
+      if (next === state) return;
+      state = next;
+      emit();
+    },
+    applyThreadItems: (threadId: ThreadId, items: readonly OrchestrationThreadStreamItem[]) => {
+      let next = state;
+      for (const item of coalesceThreadItems(threadId, next, items)) {
+        next = applyThreadItem(next, threadId, item);
+      }
       if (next === state) return;
       state = next;
       emit();
@@ -80,10 +90,69 @@ export function applyThreadItem(
   };
 }
 
+export function coalesceThreadItems(
+  threadId: ThreadId,
+  state: ThreadDetailState,
+  items: readonly OrchestrationThreadStreamItem[],
+): OrchestrationThreadStreamItem[] {
+  const output: OrchestrationThreadStreamItem[] = [];
+  let pending: OrchestrationThreadStreamItem | null = null;
+  let lastSequence = state.entries[threadId]?.lastAppliedSequence ?? 0;
+
+  const flushPending = () => {
+    if (pending) {
+      output.push(pending);
+      pending = null;
+    }
+  };
+
+  for (const item of items) {
+    if (item.kind === "snapshot") {
+      flushPending();
+      if (item.snapshot.snapshotSequence < lastSequence) {
+        continue;
+      }
+      output.push(item);
+      lastSequence = item.snapshot.snapshotSequence;
+      continue;
+    }
+    const eventItem = item as ThreadEventItem;
+    if (eventItem.event.aggregateKind !== "thread" || eventItem.event.aggregateId !== threadId) {
+      continue;
+    }
+    if (eventItem.event.sequence <= lastSequence) continue;
+    if (!isAssistantStreamingMessageEvent(eventItem)) {
+      flushPending();
+      output.push(eventItem);
+      lastSequence = eventItem.event.sequence;
+      continue;
+    }
+    if (pending && isSameStreamingMessage(pending, eventItem)) {
+      pending = mergeStreamingMessageEvent(pending, eventItem);
+    } else {
+      flushPending();
+      pending = eventItem;
+    }
+    lastSequence = eventItem.event.sequence;
+  }
+  flushPending();
+  return output;
+}
+
 function applyThreadSnapshot(
   state: ThreadDetailState,
   snapshot: OrchestrationThreadDetailSnapshot,
 ): ThreadDetailState {
+  const current = state.entries[snapshot.thread.id];
+  if (current && snapshot.snapshotSequence < current.lastAppliedSequence) {
+    return state;
+  }
+  if (
+    current?.lastAppliedSequence === snapshot.snapshotSequence &&
+    structuralEqual(current.thread, snapshot.thread)
+  ) {
+    return state;
+  }
   return {
     entries: {
       ...state.entries,
@@ -195,6 +264,8 @@ export function isSnapshotRequiredThreadEvent(item: OrchestrationThreadStreamIte
 function upsertById<
   T extends OrchestrationMessage | { readonly id: string; readonly createdAt: string },
 >(values: readonly T[], value: T): T[] {
+  const existing = values.find((entry) => entry.id === value.id);
+  if (existing && structuralEqual(existing, value)) return values as T[];
   return [...values.filter((entry) => entry.id !== value.id), value].toSorted((left, right) =>
     left.createdAt.localeCompare(right.createdAt),
   );
@@ -218,6 +289,7 @@ function upsertMessage(
     attachments: value.attachments,
     updatedAt: value.updatedAt,
   };
+  if (structuralEqual(existing, next)) return values as OrchestrationMessage[];
   return upsertById(values, next);
 }
 
@@ -234,7 +306,52 @@ function upsertActivity(
   values: readonly OrchestrationThreadActivity[],
   value: OrchestrationThreadActivity,
 ): OrchestrationThreadActivity[] {
+  const existing = values.find((entry) => entry.id === value.id);
+  if (existing && structuralEqual(existing, value)) return values as OrchestrationThreadActivity[];
   return [...values.filter((entry) => entry.id !== value.id), value].toSorted((left, right) =>
     left.createdAt.localeCompare(right.createdAt),
   );
+}
+
+function isAssistantStreamingMessageEvent(
+  item: OrchestrationThreadStreamItem | ThreadEventItem,
+): boolean {
+  return (
+    item.kind === "event" &&
+    item.event.type === "thread.message-sent" &&
+    item.event.payload.role === "assistant" &&
+    item.event.payload.streaming === true
+  );
+}
+
+function isSameStreamingMessage(
+  left: OrchestrationThreadStreamItem | ThreadEventItem,
+  right: ThreadEventItem,
+): left is ThreadEventItem {
+  const leftPayload = left.kind === "event" ? (left.event.payload as Record<string, unknown>) : {};
+  const rightPayload = right.event.payload as Record<string, unknown>;
+  return isAssistantStreamingMessageEvent(left) && leftPayload.messageId === rightPayload.messageId;
+}
+
+function mergeStreamingMessageEvent(
+  left: ThreadEventItem,
+  right: ThreadEventItem,
+): OrchestrationThreadStreamItem {
+  const leftPayload = left.event.payload as Record<string, unknown>;
+  const rightPayload = right.event.payload as Record<string, unknown>;
+  return {
+    kind: "event",
+    event: {
+      ...right.event,
+      payload: {
+        ...rightPayload,
+        text: `${String(leftPayload.text ?? "")}${String(rightPayload.text ?? "")}`,
+      },
+    },
+  } as OrchestrationThreadStreamItem;
+}
+
+function structuralEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  return JSON.stringify(left) === JSON.stringify(right);
 }

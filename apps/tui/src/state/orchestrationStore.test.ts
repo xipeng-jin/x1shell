@@ -51,6 +51,25 @@ describe("TUI shell orchestration store", () => {
     expect(store.getSnapshot().threads.map((thread) => thread.id)).toEqual(["thread-b"]);
   });
 
+  it("ignores stale shell snapshots after newer live events", () => {
+    const store = createOrchestrationStore();
+    store.applyShellItem({ kind: "snapshot", snapshot: shellSnapshot(10, ["thread-a"]) });
+    store.applyShellItem({
+      kind: "thread-upserted",
+      sequence: 15,
+      thread: threadShell("thread-b", "project-a", "Thread B"),
+    });
+    store.applyShellItem({ kind: "snapshot", snapshot: shellSnapshot(12, ["thread-stale"]) });
+
+    expect(store.getSnapshot().lastAppliedSequence).toBe(15);
+    expect(
+      store
+        .getSnapshot()
+        .threads.map((thread) => thread.id)
+        .toSorted(),
+    ).toEqual(["thread-a", "thread-b"]);
+  });
+
   it("does not emit for stale shell events", () => {
     const store = createOrchestrationStore();
     let emissions = 0;
@@ -66,6 +85,54 @@ describe("TUI shell orchestration store", () => {
 
     expect(emissions).toBe(2);
     expect(store.getSnapshot().threads[0]?.title).toBe("thread-a");
+  });
+
+  it("applies multiple shell items with one batch emission", () => {
+    const store = createOrchestrationStore();
+    let emissions = 0;
+    store.subscribe(() => {
+      emissions += 1;
+    });
+    store.applyShellItem({ kind: "snapshot", snapshot: shellSnapshot(10, ["thread-a"]) });
+    store.applyShellItems([
+      {
+        kind: "thread-upserted",
+        sequence: 12,
+        thread: threadShell("thread-b", "project-a", "Thread B"),
+      },
+      {
+        kind: "thread-upserted",
+        sequence: 11,
+        thread: threadShell("thread-stale", "project-a", "Stale"),
+      },
+      {
+        kind: "thread-upserted",
+        sequence: 17,
+        thread: threadShell("thread-c", "project-a", "Thread C"),
+      },
+    ]);
+
+    expect(emissions).toBe(3);
+    expect(store.getSnapshot().lastAppliedSequence).toBe(17);
+    expect(
+      store
+        .getSnapshot()
+        .threads.map((thread) => thread.id)
+        .toSorted(),
+    ).toEqual(["thread-a", "thread-b", "thread-c"]);
+  });
+
+  it("reuses structurally equal shell upserts", () => {
+    const store = createOrchestrationStore();
+    store.applyShellItem({ kind: "snapshot", snapshot: shellSnapshot(10, ["thread-a"]) });
+    const beforeThreads = store.getSnapshot().threads;
+    store.applyShellItem({
+      kind: "thread-upserted",
+      sequence: 12,
+      thread: threadShell("thread-a", "project-a", "thread-a"),
+    });
+
+    expect(store.getSnapshot().threads).toBe(beforeThreads);
   });
 
   it("keeps an explicit project draft selection on a new thread", () => {
