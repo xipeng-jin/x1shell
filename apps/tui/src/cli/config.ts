@@ -14,6 +14,7 @@ export interface TuiPaths {
 
 export interface CliConfig {
   paths: TuiPaths;
+  attach: AttachConfig;
   headless: {
     enabled: boolean;
     width: number;
@@ -23,6 +24,16 @@ export interface CliConfig {
   };
   theme?: string;
   verbose: boolean;
+}
+
+export interface AttachConfig {
+  readonly mode: "none" | "remote" | "local";
+  readonly url?: string;
+  readonly bearerStdin: boolean;
+  readonly credentialStdin: boolean;
+  readonly baseDir: string;
+  readonly devUrl?: string;
+  readonly serverEntry?: string;
 }
 
 export function resolveCliConfig(
@@ -37,9 +48,29 @@ export function resolveCliConfig(
     readEnvString(env.X1SHELL_HEADLESS_FRAME_PATH) ??
     paths.headlessFrameFile;
   const theme = readFlag(args, "--theme") ?? readEnvString(env.X1SHELL_THEME);
+  const attachUrl = readFlag(args, "--attach");
+  validateAttachArgs(args, attachUrl);
+  const baseDir =
+    readFlag(args, "--base-dir") ??
+    readEnvString(env.T3CODE_HOME) ??
+    path.join(homeDir(env), ".t3");
+  const devUrl = readFlag(args, "--dev-url");
+  const serverEntry = readFlag(args, "--server-entry") ?? readEnvString(env.X1SHELL_SERVER_ENTRY);
+  if (serverEntry && !path.isAbsolute(serverEntry)) {
+    throw new Error("--server-entry must be an absolute path.");
+  }
 
   return {
     paths,
+    attach: {
+      mode: attachUrl ? "remote" : "local",
+      ...(attachUrl ? { url: attachUrl } : {}),
+      bearerStdin: hasFlag(args, "--attach-bearer-stdin"),
+      credentialStdin: hasFlag(args, "--attach-credential-stdin"),
+      baseDir,
+      ...(devUrl ? { devUrl } : {}),
+      ...(serverEntry ? { serverEntry } : {}),
+    },
     headless: {
       enabled: headlessEnabled,
       width: readPositiveInt(readFlag(args, "--headless-width") ?? env.X1SHELL_HEADLESS_WIDTH, 120),
@@ -56,6 +87,65 @@ export function resolveCliConfig(
     ...(theme === undefined ? {} : { theme }),
     verbose: readBoolean(readFlag(args, "--verbose") ?? env.X1SHELL_VERBOSE) ?? false,
   };
+}
+
+function validateAttachArgs(args: readonly string[], attachUrl: string | undefined): void {
+  const positional = collectPositionalArgs(args);
+  if (positional.length > 0) {
+    throw new Error("X1Shell does not accept positional credentials or arguments.");
+  }
+  if (hasFlag(args, "--attach-bearer-stdin") && hasFlag(args, "--attach-credential-stdin")) {
+    throw new Error("Use only one attach credential stdin channel.");
+  }
+  if (attachUrl) {
+    const url = new URL(attachUrl);
+    if (url.username || url.password) {
+      throw new Error("Attach URLs must not contain embedded credentials.");
+    }
+    for (const key of url.searchParams.keys()) {
+      if (isSensitiveAttachUrlKey(key)) {
+        throw new Error(`Attach URLs must not contain credential parameter '${key}'.`);
+      }
+    }
+    const hashParams = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
+    for (const key of hashParams.keys()) {
+      if (isSensitiveAttachUrlKey(key)) {
+        throw new Error(`Attach URLs must not contain credential fragment '${key}'.`);
+      }
+    }
+  }
+}
+
+function isSensitiveAttachUrlKey(key: string): boolean {
+  return /^(?:ws[-_]?token|token|credential|pairing|bootstrap|auth[-_]?token|session|cookie)$/i.test(
+    key,
+  );
+}
+
+function collectPositionalArgs(args: readonly string[]): string[] {
+  const positional: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (!arg) continue;
+    if (!arg.startsWith("--")) {
+      positional.push(arg);
+      continue;
+    }
+    if (arg.includes("=") || isBooleanFlag(arg)) {
+      continue;
+    }
+    const next = args[index + 1];
+    if (next && !next.startsWith("--")) {
+      index += 1;
+    }
+  }
+  return positional;
+}
+
+function isBooleanFlag(arg: string): boolean {
+  return ["--headless", "--verbose", "--attach-bearer-stdin", "--attach-credential-stdin"].includes(
+    arg,
+  );
 }
 
 export function resolveTuiPaths(env: NodeJS.ProcessEnv = process.env): TuiPaths {
@@ -113,6 +203,14 @@ function readFlag(args: readonly string[], name: string): string | undefined {
     if (arg.startsWith(equalsPrefix)) return arg.slice(equalsPrefix.length);
   }
   return undefined;
+}
+
+function hasFlag(args: readonly string[], name: string): boolean {
+  return args.some((arg) => arg === name || arg.startsWith(`${name}=`));
+}
+
+function homeDir(env: NodeJS.ProcessEnv): string {
+  return env.HOME || os.homedir();
 }
 
 function readBoolean(value: string | undefined): boolean | undefined {

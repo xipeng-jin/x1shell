@@ -3,6 +3,7 @@ import type React from "react";
 import { useEffect, useState } from "react";
 import type { TuiPaths } from "../cli/config.js";
 import { redactText } from "../runtime/redaction.js";
+import type { TuiServerStatusSnapshot } from "../state/serverConfigStore.js";
 import { SafeMarkdown } from "../terminal/safeMarkdown.js";
 import { sanitizeText } from "../terminal/safeTextStream.js";
 import type { TuiTheme } from "../terminal/theme.js";
@@ -11,11 +12,13 @@ export function App(props: {
   interruptRequestToken: number;
   paths: TuiPaths;
   theme: TuiTheme;
+  serverStatus?: TuiServerStatusSnapshot;
   onRequestExit: () => void;
 }): React.ReactNode {
   const dimensions = useTerminalDimensions();
   const [lastInterruptToken, setLastInterruptToken] = useState(props.interruptRequestToken);
   const compact = dimensions.width < 96;
+  const status = props.serverStatus ?? DEFAULT_STATUS;
 
   useEffect(() => {
     setLastInterruptToken(props.interruptRequestToken);
@@ -46,7 +49,7 @@ export function App(props: {
         borderColor={props.theme.palette.border}
       >
         <text fg={props.theme.palette.accent} attributes={1}>
-          {`X1Shell Phase 2 boot | ${dimensions.width}x${dimensions.height}`}
+          {`X1Shell | ${dimensions.width}x${dimensions.height}`}
         </text>
       </box>
 
@@ -63,8 +66,14 @@ export function App(props: {
           <text fg={props.theme.palette.text} attributes={1}>
             Workspace
           </text>
-          <text fg={props.theme.palette.muted}>Static shell only</text>
-          <text fg={props.theme.palette.muted}>No server connection in Phase 2</text>
+          <text fg={props.theme.palette.muted}>{`Connection: ${status.connection}`}</text>
+          <text fg={props.theme.palette.muted}>{`Auth: ${status.auth}`}</text>
+          <text
+            fg={props.theme.palette.muted}
+          >{`Threads: ${status.shell?.threads.length ?? 0}`}</text>
+          <text
+            fg={props.theme.palette.muted}
+          >{`Providers: ${status.config?.providers.length ?? 0}`}</text>
         </box>
 
         <box
@@ -75,7 +84,7 @@ export function App(props: {
           backgroundColor={props.theme.palette.canvas}
         >
           <text fg={props.theme.palette.text} attributes={1}>
-            Renderer Ready
+            {status.connection === "connected" ? "Server Connected" : "Renderer Ready"}
           </text>
           <text fg={props.theme.palette.muted}>
             Alternate screen, controlled cleanup, resize state, and safe text primitives are active.
@@ -93,6 +102,19 @@ export function App(props: {
           <text
             fg={props.theme.palette.danger}
           >{`Interrupts observed: ${lastInterruptToken}`}</text>
+          {status.latestWelcome ? (
+            <text fg={props.theme.palette.muted}>
+              {`Welcome: ${safeDisplayText(status.latestWelcome.payload.projectName)}`}
+            </text>
+          ) : null}
+          {status.latestReady ? (
+            <text fg={props.theme.palette.muted}>
+              {`Ready: ${safeDisplayText(status.latestReady.payload.at)}`}
+            </text>
+          ) : null}
+          {status.error ? (
+            <text fg={props.theme.palette.danger}>{safeDisplayText(status.error)}</text>
+          ) : null}
         </box>
       </box>
 
@@ -105,12 +127,24 @@ export function App(props: {
         backgroundColor={props.theme.palette.panelMuted}
       >
         <text fg={props.theme.palette.muted}>
-          Ctrl+C records interrupt | q exits | headless frame supported
+          {`Config ${status.config ? "loaded" : "pending"} | lifecycle ${
+            status.latestReady ? "ready" : "pending"
+          } | shell ${status.shell ? `seq ${status.shell.snapshotSequence}` : "pending"} | q exits`}
         </text>
       </box>
     </box>
   );
 }
+
+const DEFAULT_STATUS: TuiServerStatusSnapshot = {
+  connection: "idle",
+  auth: "none",
+  config: null,
+  latestWelcome: null,
+  latestReady: null,
+  shell: null,
+  error: null,
+};
 
 function safeDisplayText(value: string): string {
   return sanitizeText(redactText(value));

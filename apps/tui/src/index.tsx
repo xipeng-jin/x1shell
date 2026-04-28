@@ -6,6 +6,12 @@ import { createRoot } from "@opentui/react";
 import { App } from "./app/App.js";
 import { resolveCliConfig } from "./cli/config.js";
 import { readPreferences } from "./cli/preferences.js";
+import {
+  resolveBearerAttachTarget,
+  resolveBootstrapAttachTarget,
+  resolveLocalAttachTarget,
+} from "./runtime/attach.js";
+import { createTuiConnectionController } from "./runtime/connection.js";
 import { createLogger, safeOutputUnknown } from "./runtime/log.js";
 import {
   captureProcessListeners,
@@ -13,6 +19,7 @@ import {
 } from "./runtime/processListeners.js";
 import { resolveKeyboardPolicy } from "./terminal/keyboard.js";
 import { resolveTheme } from "./terminal/theme.js";
+import { createServerConfigStore } from "./state/serverConfigStore.js";
 
 type ProcessEventName =
   | "SIGINT"
@@ -48,6 +55,11 @@ async function runHeadless(
   logger: ReturnType<typeof createLogger>,
 ): Promise<void> {
   const theme = resolveTheme(config.theme ?? preferences.theme);
+  const serverStore = createServerConfigStore();
+  const controller = await maybeCreateAttachController(config, serverStore);
+  await controller?.connect().catch((error) => {
+    serverStore.setConnection("error", safeOutputUnknown(error));
+  });
   let setup: Awaited<ReturnType<typeof createTestRenderer>> | undefined;
   let root: ReturnType<typeof createRoot> | undefined;
 
@@ -72,6 +84,7 @@ async function runHeadless(
     await writeFile(config.headless.framePath, frame, "utf8");
     logger.info("headless frame written", { framePath: config.headless.framePath });
   } finally {
+    await controller?.dispose();
     root?.unmount();
     setup?.renderer.destroy();
   }
@@ -88,6 +101,11 @@ async function runInteractive(
   const { renderer, root } = setup;
   let shuttingDown = false;
   const interruptRequestToken = 0;
+  const serverStore = createServerConfigStore();
+  const controller = await maybeCreateAttachController(config, serverStore).catch((error) => {
+    serverStore.setConnection("error", safeOutputUnknown(error));
+    return null;
+  });
 
   const render = () => {
     root.render(
@@ -95,14 +113,21 @@ async function runInteractive(
         interruptRequestToken={interruptRequestToken}
         paths={config.paths}
         theme={theme}
-        onRequestExit={() => shutdown(0)}
+        serverStatus={serverStore.getSnapshot()}
+        onRequestExit={() => void shutdown(0)}
       />,
     );
   };
 
-  const shutdown = (code = 0, error?: unknown) => {
+  const shutdown = async (code = 0, error?: unknown) => {
     if (shuttingDown) return;
     shuttingDown = true;
+
+    try {
+      await controller?.dispose();
+    } catch (disposeError) {
+      logger.error("failed to dispose TUI connection", disposeError);
+    }
 
     try {
       root.unmount();
@@ -130,11 +155,11 @@ async function runInteractive(
   };
 
   const handlers = [
-    ["SIGINT", () => shutdown(130)],
-    ["SIGTERM", () => shutdown(0)],
-    ["SIGHUP", () => shutdown(0)],
-    ["uncaughtException", (error: unknown) => shutdown(1, error)],
-    ["unhandledRejection", (error: unknown) => shutdown(1, error)],
+    ["SIGINT", () => void shutdown(130)],
+    ["SIGTERM", () => void shutdown(0)],
+    ["SIGHUP", () => void shutdown(0)],
+    ["uncaughtException", (error: unknown) => void shutdown(1, error)],
+    ["unhandledRejection", (error: unknown) => void shutdown(1, error)],
   ] as const satisfies readonly (readonly [ProcessEventName, (...args: never[]) => void])[];
 
   for (const [event, handler] of handlers) {
@@ -148,12 +173,95 @@ async function runInteractive(
   });
 
   try {
+    const unsubscribeServerStore = serverStore.subscribe(() => render());
+    renderer.once("destroy", unsubscribeServerStore);
     render();
+    void controller?.connect().catch((error) => {
+      serverStore.setConnection("error", safeOutputUnknown(error));
+    });
   } catch (error) {
     root.unmount();
     renderer.destroy();
     throw error;
   }
+}
+
+async function maybeCreateAttachController(
+  config: ReturnType<typeof resolveCliConfig>,
+  serverStore: ReturnType<typeof createServerConfigStore>,
+) {
+  if (config.attach.mode === "local") {
+    if (!config.attach.serverEntry) {
+      return null;
+    }
+    const target = await resolveLocalAttachTarget({
+      baseDir: config.attach.baseDir,
+      ...(config.attach.devUrl ? { devUrl: config.attach.devUrl } : {}),
+      serverEntry: config.attach.serverEntry,
+    });
+    serverStore.setAuth("owner");
+    return createTuiConnectionController({ target, store: serverStore });
+  }
+  if (!config.attach.url) {
+    return null;
+  }
+  const secret =
+    config.attach.bearerStdin || config.attach.credentialStdin
+      ? await readStdinSecret()
+      : await promptMasked("Attach credential: ");
+  const target = config.attach.credentialStdin
+    ? await resolveBootstrapAttachTarget({ baseUrl: config.attach.url, credential: secret })
+    : await resolveBearerAttachTarget({ baseUrl: config.attach.url, bearerToken: secret });
+  serverStore.setAuth(config.attach.credentialStdin ? "bootstrap" : "bearer");
+  return createTuiConnectionController({ target, store: serverStore });
+}
+
+async function readStdinSecret(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8").trim();
+}
+
+async function promptMasked(prompt: string): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error(
+      "Attach credentials require --attach-bearer-stdin or --attach-credential-stdin when stdin is not interactive.",
+    );
+  }
+  process.stdout.write(prompt);
+  const wasRaw = process.stdin.isRaw;
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  let value = "";
+  return await new Promise((resolve, reject) => {
+    const onData = (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      if (text === "\u0003") {
+        cleanup();
+        reject(new Error("Attach credential prompt interrupted."));
+        return;
+      }
+      if (text === "\r" || text === "\n") {
+        process.stdout.write("\n");
+        cleanup();
+        resolve(value);
+        return;
+      }
+      if (text === "\u007f") {
+        value = value.slice(0, -1);
+        return;
+      }
+      value += text;
+    };
+    const cleanup = () => {
+      process.stdin.off("data", onData);
+      process.stdin.setRawMode(wasRaw);
+      process.stdin.pause();
+    };
+    process.stdin.on("data", onData);
+  });
 }
 
 async function createInteractiveRenderer(
