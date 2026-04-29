@@ -10,8 +10,11 @@ import {
   type OrchestrationProjectShell,
   type OrchestrationThread,
   type OrchestrationThreadShell,
+  type ProviderInteractionMode,
   type ProjectId,
   type ProviderApprovalDecision,
+  type RuntimeMode,
+  type UploadChatAttachment,
   type TurnId,
 } from "@t3tools/contracts";
 import { createModelSelection, resolveModelSlugForProvider } from "@t3tools/shared/model";
@@ -25,6 +28,10 @@ type ThreadLike = OrchestrationThreadShell | OrchestrationThread;
 export function buildExistingThreadTurnStart(input: {
   readonly thread: OrchestrationThreadShell;
   readonly text: string;
+  readonly attachments?: readonly UploadChatAttachment[];
+  readonly modelSelection?: ModelSelection;
+  readonly runtimeMode?: RuntimeMode;
+  readonly interactionMode?: ProviderInteractionMode;
   readonly now?: string;
 }): ClientThreadTurnStartCommand {
   const createdAt = input.now ?? new Date().toISOString();
@@ -36,11 +43,11 @@ export function buildExistingThreadTurnStart(input: {
       messageId: newMessageId(),
       role: "user",
       text: input.text,
-      attachments: [],
+      attachments: [...(input.attachments ?? [])],
     },
-    modelSelection: input.thread.modelSelection,
-    runtimeMode: input.thread.runtimeMode,
-    interactionMode: input.thread.interactionMode,
+    modelSelection: input.modelSelection ?? input.thread.modelSelection,
+    runtimeMode: input.runtimeMode ?? input.thread.runtimeMode,
+    interactionMode: input.interactionMode ?? input.thread.interactionMode,
     createdAt,
   };
 }
@@ -127,11 +134,17 @@ export function canStopThreadSession(thread: ThreadLike | null | undefined): boo
 export function buildNewThreadTurnStart(input: {
   readonly project: OrchestrationProjectShell;
   readonly text: string;
+  readonly attachments?: readonly UploadChatAttachment[];
+  readonly modelSelection?: ModelSelection;
+  readonly runtimeMode?: RuntimeMode;
+  readonly interactionMode?: ProviderInteractionMode;
   readonly titleSeed?: string;
   readonly now?: string;
 }): ClientThreadTurnStartCommand {
   const createdAt = input.now ?? new Date().toISOString();
-  const modelSelection = resolveProjectModelSelection(input.project);
+  const modelSelection = input.modelSelection ?? resolveProjectModelSelection(input.project);
+  const runtimeMode = input.runtimeMode ?? DEFAULT_RUNTIME_MODE;
+  const interactionMode = input.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE;
   const threadId = newThreadId();
   const titleSeed = (input.titleSeed ?? input.text.trim().slice(0, 80)) || "New thread";
   return {
@@ -142,25 +155,71 @@ export function buildNewThreadTurnStart(input: {
       messageId: newMessageId(),
       role: "user",
       text: input.text,
-      attachments: [],
+      attachments: [...(input.attachments ?? [])],
     },
     modelSelection,
     titleSeed,
-    runtimeMode: DEFAULT_RUNTIME_MODE,
-    interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+    runtimeMode,
+    interactionMode,
     bootstrap: {
       createThread: {
         projectId: input.project.id,
         title: titleSeed,
         modelSelection,
-        runtimeMode: DEFAULT_RUNTIME_MODE,
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode,
+        interactionMode,
         branch: null,
         worktreePath: input.project.workspaceRoot,
         createdAt,
       },
     },
     createdAt,
+  };
+}
+
+export function buildThreadMetaUpdate(input: {
+  readonly threadId: ThreadId;
+  readonly title?: string;
+  readonly modelSelection?: ModelSelection;
+  readonly branch?: string | null;
+  readonly worktreePath?: string | null;
+}): Extract<ClientOrchestrationCommand, { readonly type: "thread.meta.update" }> {
+  return {
+    type: "thread.meta.update",
+    commandId: newCommandId(),
+    threadId: input.threadId,
+    ...(input.title !== undefined ? { title: input.title } : {}),
+    ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+    ...(input.branch !== undefined ? { branch: input.branch } : {}),
+    ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
+  };
+}
+
+export function buildThreadRuntimeModeSet(input: {
+  readonly threadId: ThreadId;
+  readonly runtimeMode: RuntimeMode;
+  readonly now?: string;
+}): Extract<ClientOrchestrationCommand, { readonly type: "thread.runtime-mode.set" }> {
+  return {
+    type: "thread.runtime-mode.set",
+    commandId: newCommandId(),
+    threadId: input.threadId,
+    runtimeMode: input.runtimeMode,
+    createdAt: input.now ?? new Date().toISOString(),
+  };
+}
+
+export function buildThreadInteractionModeSet(input: {
+  readonly threadId: ThreadId;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly now?: string;
+}): Extract<ClientOrchestrationCommand, { readonly type: "thread.interaction-mode.set" }> {
+  return {
+    type: "thread.interaction-mode.set",
+    commandId: newCommandId(),
+    threadId: input.threadId,
+    interactionMode: input.interactionMode,
+    createdAt: input.now ?? new Date().toISOString(),
   };
 }
 

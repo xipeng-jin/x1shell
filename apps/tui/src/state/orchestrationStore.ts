@@ -1,11 +1,21 @@
 import type {
+  ModelSelection,
   OrchestrationProjectShell,
   OrchestrationShellSnapshot,
   OrchestrationShellStreamItem,
   OrchestrationThreadShell,
+  ProviderInteractionMode,
   ProjectId,
+  RuntimeMode,
   ThreadId,
+  UploadChatAttachment,
 } from "@t3tools/contracts";
+
+export interface TuiDraftContext {
+  readonly modelSelection?: ModelSelection;
+  readonly runtimeMode?: RuntimeMode;
+  readonly interactionMode?: ProviderInteractionMode;
+}
 
 export interface TuiShellState {
   readonly projects: ReadonlyArray<OrchestrationProjectShell>;
@@ -15,6 +25,8 @@ export interface TuiShellState {
   readonly selectedProjectId: ProjectId | null;
   readonly selectedThreadId: ThreadId | null;
   readonly draftByProjectId: Readonly<Record<string, string>>;
+  readonly draftContextByProjectId: Readonly<Record<string, TuiDraftContext>>;
+  readonly draftAttachmentsByProjectId: Readonly<Record<string, readonly UploadChatAttachment[]>>;
   readonly pendingDraftThreadIdByProjectId: Readonly<Record<string, ThreadId>>;
 }
 
@@ -29,6 +41,8 @@ export function createOrchestrationStore(initial?: Partial<TuiShellState>) {
     selectedProjectId: null,
     selectedThreadId: null,
     draftByProjectId: {},
+    draftContextByProjectId: {},
+    draftAttachmentsByProjectId: {},
     pendingDraftThreadIdByProjectId: {},
     ...initial,
   };
@@ -107,6 +121,27 @@ export function createOrchestrationStore(initial?: Partial<TuiShellState>) {
       const { [projectId]: _removed, ...rest } = state.draftByProjectId;
       setState({ ...state, draftByProjectId: rest });
     },
+    setDraftContext: (projectId: ProjectId, context: TuiDraftContext) => {
+      setState({
+        ...state,
+        draftContextByProjectId: { ...state.draftContextByProjectId, [projectId]: context },
+      });
+    },
+    setDraftAttachments: (projectId: ProjectId, attachments: readonly UploadChatAttachment[]) => {
+      setState({
+        ...state,
+        draftAttachmentsByProjectId: {
+          ...state.draftAttachmentsByProjectId,
+          [projectId]: attachments,
+        },
+      });
+    },
+    clearDraftAttachments: (projectId: ProjectId) => {
+      setState({
+        ...state,
+        draftAttachmentsByProjectId: omitRecordKey(state.draftAttachmentsByProjectId, projectId),
+      });
+    },
   };
 }
 
@@ -139,6 +174,8 @@ export function applyShellItem(
       projects: state.projects.filter((project) => project.id !== item.projectId),
       threads: state.threads.filter((thread) => thread.projectId !== item.projectId),
       draftByProjectId,
+      draftContextByProjectId: omitRecordKey(state.draftContextByProjectId, item.projectId),
+      draftAttachmentsByProjectId: omitRecordKey(state.draftAttachmentsByProjectId, item.projectId),
       pendingDraftThreadIdByProjectId: omitRecordKey(
         state.pendingDraftThreadIdByProjectId,
         item.projectId,
@@ -186,6 +223,8 @@ export function fromShellSnapshot(
   previous?: Pick<
     TuiShellState,
     | "draftByProjectId"
+    | "draftContextByProjectId"
+    | "draftAttachmentsByProjectId"
     | "pendingDraftThreadIdByProjectId"
     | "selectedProjectId"
     | "selectedThreadId"
@@ -199,6 +238,8 @@ export function fromShellSnapshot(
     selectedProjectId: previous?.selectedProjectId ?? snapshot.projects[0]?.id ?? null,
     selectedThreadId: previous?.selectedThreadId ?? snapshot.threads[0]?.id ?? null,
     draftByProjectId: previous?.draftByProjectId ?? {},
+    draftContextByProjectId: previous?.draftContextByProjectId ?? {},
+    draftAttachmentsByProjectId: previous?.draftAttachmentsByProjectId ?? {},
     pendingDraftThreadIdByProjectId: previous?.pendingDraftThreadIdByProjectId ?? {},
   });
 }

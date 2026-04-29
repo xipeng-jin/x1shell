@@ -95,13 +95,14 @@ export function buildUserInputAnswers(input: {
   readonly pending: PendingUserInput;
   readonly selectedOptions: Readonly<Record<string, readonly number[]>>;
   readonly customAnswer?: string;
+  readonly customAnswers?: Readonly<Record<string, string>>;
   readonly questionIds?: ReadonlySet<string>;
 }): Record<string, unknown> {
   const answers: Record<string, unknown> = {};
-  const custom = input.customAnswer?.trim();
   for (const question of input.pending.questions) {
     if (input.questionIds && !input.questionIds.has(question.id)) continue;
     const selected = input.selectedOptions[question.id] ?? [];
+    const custom = (input.customAnswers?.[question.id] ?? input.customAnswer)?.trim();
     const labels = selected
       .map((index) => question.options[index]?.label)
       .filter((label): label is string => Boolean(label));

@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildExistingThreadTurnStart,
   buildNewThreadTurnStart,
+  buildThreadInteractionModeSet,
+  buildThreadMetaUpdate,
+  buildThreadRuntimeModeSet,
   buildThreadApprovalResponse,
   buildThreadArchive,
   buildThreadSessionStop,
@@ -73,6 +76,65 @@ describe("TUI orchestration command builders", () => {
         },
       },
     });
+  });
+
+  it("builds turn starts with draft controls and attachments", () => {
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000021")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000022");
+
+    const command = buildExistingThreadTurnStart({
+      now: "2026-04-28T12:00:00.000Z",
+      text: "explain image",
+      thread: threadShell("thread-a"),
+      modelSelection: { provider: "codex", model: "gpt-5.1" } as never,
+      runtimeMode: "approval-required",
+      interactionMode: "plan",
+      attachments: [
+        {
+          type: "image",
+          name: "pasted-image",
+          mimeType: "image/png",
+          sizeBytes: 3,
+          dataUrl: "data:image/png;base64,AAAA",
+        },
+      ],
+    });
+
+    expect(command).toMatchObject({
+      modelSelection: { provider: "codex", model: "gpt-5.1" },
+      runtimeMode: "approval-required",
+      interactionMode: "plan",
+      message: { attachments: [{ mimeType: "image/png", sizeBytes: 3 }] },
+    });
+  });
+
+  it("builds Phase 8 model, runtime, and interaction commands", () => {
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000031")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000032")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000033");
+
+    expect(
+      buildThreadMetaUpdate({
+        threadId: "thread-a" as never,
+        modelSelection: { provider: "codex", model: "gpt-5.1" } as never,
+      }),
+    ).toMatchObject({ type: "thread.meta.update", modelSelection: { model: "gpt-5.1" } });
+    expect(
+      buildThreadRuntimeModeSet({
+        threadId: "thread-a" as never,
+        runtimeMode: "auto-accept-edits",
+        now: "2026-04-28T12:00:00.000Z",
+      }),
+    ).toMatchObject({ type: "thread.runtime-mode.set", runtimeMode: "auto-accept-edits" });
+    expect(
+      buildThreadInteractionModeSet({
+        threadId: "thread-a" as never,
+        interactionMode: "plan",
+        now: "2026-04-28T12:00:00.000Z",
+      }),
+    ).toMatchObject({ type: "thread.interaction-mode.set", interactionMode: "plan" });
   });
 
   it("builds Phase 7 action commands", () => {

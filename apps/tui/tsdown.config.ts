@@ -7,5 +7,6 @@ export default defineConfig({
   outExtensions: () => ({ js: ".mjs" }),
   sourcemap: true,
   clean: true,
+  inlineOnly: false,
   noExternal: (id) => id.startsWith("@t3tools/"),
 });

@@ -253,6 +253,41 @@ describe("TUI connection runtime", () => {
     await controller.dispose();
   });
 
+  it("disposes partially-created connections when setup fails", async () => {
+    const store = createServerConfigStore();
+    const disposed: number[] = [];
+    const controller = createTuiConnectionController({
+      target: attachTarget(),
+      store,
+      createConnection: () =>
+        ({
+          client: {
+            server: {
+              getConfig: () => Promise.resolve(serverConfig("default-provider")),
+              subscribeConfig: () => {
+                throw new Error("config stream failed");
+              },
+              subscribeLifecycle: () => () => undefined,
+            },
+            orchestration: {
+              subscribeShell: () => () => undefined,
+            },
+          },
+          transport: {},
+          dispose: async () => {
+            disposed.push(1);
+          },
+        }) as never,
+    });
+
+    await expect(controller.connect()).rejects.toThrow("config stream failed");
+    expect(disposed).toEqual([1]);
+    expect(store.getSnapshot().connection).toBe("connecting");
+
+    await controller.dispose();
+    expect(disposed).toEqual([1]);
+  });
+
   it("ignores stale getConfig results from a disposed connection after reconnect", async () => {
     const store = createServerConfigStore();
     const staleConfig = deferred<unknown>();
@@ -405,6 +440,52 @@ describe("TUI connection runtime", () => {
 
     await controller.dispose();
     expect(disposed).toEqual([0, 1]);
+  });
+
+  it("continues bounded reconnect attempts after a reconnect attempt fails", async () => {
+    const store = createServerConfigStore();
+    const disposed: number[] = [];
+    let reportDisconnect: ((metadata: { readonly message: string }) => void) | undefined;
+    let connectionCount = 0;
+    const controller = createTuiConnectionController({
+      target: attachTarget(),
+      store,
+      createConnection: (_provider, options) => {
+        const connectionId = connectionCount;
+        connectionCount += 1;
+        reportDisconnect = options?.onSubscriptionDisconnect;
+        if (connectionId === 1) {
+          return fakeConnection({
+            dispose: () => disposed.push(connectionId),
+            shellSnapshot: shellSnapshot(2, "thread-b"),
+            subscribeShell: () => {
+              throw new Error("temporary shell subscription failure");
+            },
+          });
+        }
+        return fakeConnection({
+          dispose: () => disposed.push(connectionId),
+          shellSnapshot:
+            connectionId === 0 ? shellSnapshot(1, "thread-a") : shellSnapshot(3, "thread-c"),
+        });
+      },
+    });
+
+    await controller.connect();
+    expect(store.getSnapshot().shell?.threads).toEqual([{ id: "thread-a" }]);
+
+    reportDisconnect?.({ message: "socket closed" });
+
+    await waitFor(() => {
+      expect(store.getSnapshot().shell?.snapshotSequence).toBe(3);
+    }, 20_000);
+
+    expect(connectionCount).toBe(3);
+    expect(disposed).toEqual([0, 1]);
+    expect(store.getSnapshot().connection).toBe("connected");
+
+    await controller.dispose();
+    expect(disposed).toEqual([0, 1, 2]);
   });
 
   it("subscribes active thread, unsubscribes on selection change, and resubscribes on reconnect", async () => {
@@ -561,6 +642,7 @@ function fakeConnection(input: {
   readonly configPromise?: Promise<unknown>;
   readonly configEvent?: unknown;
   readonly dispose?: () => void;
+  readonly subscribeShell?: (listener: (item: unknown) => void) => () => void;
   readonly subscribeThread?: (threadId: string, listener: (item: unknown) => void) => () => void;
 }): TuiWsConnection {
   return {
@@ -578,6 +660,9 @@ function fakeConnection(input: {
       },
       orchestration: {
         subscribeShell: (listener: (item: unknown) => void) => {
+          if (input.subscribeShell) {
+            return input.subscribeShell(listener);
+          }
           listener({ kind: "snapshot", snapshot: input.shellSnapshot });
           return () => undefined;
         },

@@ -69,6 +69,69 @@ describe("TUI pending action derivation", () => {
       }),
     ).toEqual({ visible: "Yes" });
   });
+
+  it("builds multi-question answers together when the panel submits", () => {
+    const pending = derivePendingUserInputs([
+      userInputActivity("user-input.requested", 1, "request-a", {
+        questions: [
+          {
+            id: "first",
+            header: "First",
+            question: "One?",
+            options: [{ label: "Yes", description: "Proceed" }],
+          },
+          {
+            id: "second",
+            header: "Second",
+            question: "Two?",
+            options: [{ label: "No", description: "Skip" }],
+          },
+        ],
+      }),
+    ] as never);
+
+    expect(
+      buildUserInputAnswers({
+        pending: pending[0]!,
+        selectedOptions: { first: [0], second: [0] },
+      }),
+    ).toEqual({ first: "Yes", second: "No" });
+  });
+
+  it("keeps custom answers scoped to their question ids", () => {
+    const pending = derivePendingUserInputs([
+      userInputActivity("user-input.requested", 1, "request-a", {
+        questions: [
+          {
+            id: "first",
+            header: "First",
+            question: "One?",
+            options: [{ label: "Yes", description: "Proceed" }],
+          },
+          {
+            id: "second",
+            header: "Second",
+            question: "Two?",
+            options: [{ label: "No", description: "Skip" }],
+          },
+          {
+            id: "third",
+            header: "Third",
+            question: "Three?",
+            options: [{ label: "Maybe", description: "Defer" }],
+          },
+        ],
+      }),
+    ] as never);
+
+    expect(
+      buildUserInputAnswers({
+        pending: pending[0]!,
+        selectedOptions: { second: [0] },
+        customAnswers: { first: "custom one", third: "custom three" },
+      }),
+    ).toEqual({ first: "custom one", second: "No", third: "custom three" });
+  });
 });
 
 function approvalActivity(

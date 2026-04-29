@@ -13,6 +13,7 @@ import {
   type LocalManagedSupervisor,
 } from "./runtime/localManaged.js";
 import { createLogger, safeOutputUnknown } from "./runtime/log.js";
+import { createDebugBuffer } from "./domain/debug.js";
 import {
   captureProcessListeners,
   removeAddedProcessListeners,
@@ -241,6 +242,7 @@ async function runInteractive(
   const serverStore = createServerConfigStore();
   const orchestrationStore = createOrchestrationStore();
   const threadDetailStore = createThreadDetailStore();
+  const debugBuffer = createDebugBuffer();
   const localSupervisor = await maybeStartLocalSupervisor(config, logger).catch((error) => {
     serverStore.setConnection("error", safeOutputUnknown(error));
     return null;
@@ -266,6 +268,7 @@ async function runInteractive(
         serverStatus={serverStore.getSnapshot()}
         shellState={orchestrationStore.getSnapshot()}
         threadDetailState={threadDetailStore.getSnapshot()}
+        debugEntries={debugBuffer.getSnapshot()}
         onSelectNextThread={(direction) => {
           orchestrationStore.selectNextThread(direction);
           controller?.setActiveThread(orchestrationStore.getSnapshot().selectedThreadId);
@@ -275,13 +278,43 @@ async function runInteractive(
           controller?.setActiveThread(null);
         }}
         onDraftChange={(projectId, draft) => orchestrationStore.setDraft(projectId, draft)}
+        onDraftContextChange={(projectId, context) =>
+          orchestrationStore.setDraftContext(projectId, context)
+        }
+        onDraftAttachmentsChange={(projectId, attachments) =>
+          orchestrationStore.setDraftAttachments(projectId, attachments)
+        }
         onPromoteProjectDraft={(projectId, threadId) => {
           orchestrationStore.promoteProjectDraft(projectId, threadId);
           controller?.setActiveThread(threadId);
         }}
         onSubmitCommand={(command) => {
           if (!controller) return Promise.reject(new Error("Not connected."));
+          debugBuffer.push("info", "dispatch command", { type: command.type });
           return controller.dispatchCommand(command);
+        }}
+        onReconnect={async () => {
+          debugBuffer.push("info", "manual reconnect");
+          await controller?.reconnect();
+        }}
+        onRefreshProviders={async () => {
+          debugBuffer.push("info", "refresh providers");
+          await controller?.refreshProviders();
+        }}
+        onGetTurnDiff={(input) => {
+          debugBuffer.push("info", "load turn diff", input);
+          if (!controller) return Promise.reject(new Error("Not connected."));
+          return controller.getTurnDiff(input);
+        }}
+        onGetFullThreadDiff={(input) => {
+          debugBuffer.push("info", "load full thread diff", input);
+          if (!controller) return Promise.reject(new Error("Not connected."));
+          return controller.getFullThreadDiff(input);
+        }}
+        onRefreshGitStatus={(cwd) => {
+          debugBuffer.push("info", "refresh git status", { cwd });
+          if (!controller) return Promise.reject(new Error("Not connected."));
+          return controller.refreshGitStatus(cwd);
         }}
         onRequestExit={() => void shutdown(0)}
       />,
@@ -347,9 +380,11 @@ async function runInteractive(
     const unsubscribeServerStore = serverStore.subscribe(() => render());
     const unsubscribeShellStore = orchestrationStore.subscribe(() => render());
     const unsubscribeThreadStore = threadDetailStore.subscribe(() => render());
+    const unsubscribeDebugStore = debugBuffer.subscribe(() => render());
     renderer.once("destroy", unsubscribeServerStore);
     renderer.once("destroy", unsubscribeShellStore);
     renderer.once("destroy", unsubscribeThreadStore);
+    renderer.once("destroy", unsubscribeDebugStore);
     render();
     void controller?.connect().catch((error) => {
       serverStore.setConnection("error", safeOutputUnknown(error));

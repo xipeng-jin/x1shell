@@ -18,7 +18,15 @@ import type { createServerConfigStore } from "../state/serverConfigStore.js";
 import type { createOrchestrationStore } from "../state/orchestrationStore.js";
 import type { createThreadDetailStore } from "../state/threadDetailStore.js";
 import { isSnapshotRequiredThreadEvent } from "../state/threadDetailStore.js";
-import type { ThreadId } from "@t3tools/contracts";
+import type {
+  GitStatusResult,
+  OrchestrationGetFullThreadDiffInput,
+  OrchestrationGetFullThreadDiffResult,
+  OrchestrationGetTurnDiffInput,
+  OrchestrationGetTurnDiffResult,
+  ServerSettingsPatch,
+  ThreadId,
+} from "@t3tools/contracts";
 
 type ServerConfigStore = ReturnType<typeof createServerConfigStore>;
 type OrchestrationStore = ReturnType<typeof createOrchestrationStore>;
@@ -68,6 +76,15 @@ export interface TuiConnectionController {
   readonly reconnect: () => Promise<void>;
   readonly setActiveThread: (threadId: ThreadId | null) => void;
   readonly dispatchCommand: WsRpcClient["orchestration"]["dispatchCommand"];
+  readonly getTurnDiff: (
+    input: OrchestrationGetTurnDiffInput,
+  ) => Promise<OrchestrationGetTurnDiffResult>;
+  readonly getFullThreadDiff: (
+    input: OrchestrationGetFullThreadDiffInput,
+  ) => Promise<OrchestrationGetFullThreadDiffResult>;
+  readonly refreshProviders: WsRpcClient["server"]["refreshProviders"];
+  readonly updateSettings: WsRpcClient["server"]["updateSettings"];
+  readonly refreshGitStatus: (cwd: string) => Promise<GitStatusResult>;
   readonly dispose: () => Promise<void>;
 }
 
@@ -154,52 +171,59 @@ export function createTuiConnectionController(input: {
       },
     });
     current = connection;
-    const firstShellSnapshot = deferred<void>();
-    shellBatcher = createStreamBatcher({
-      onFlush: (items) => {
-        input.orchestrationStore?.applyShellItems(items);
-        reconcileActiveThreadSubscription(connection, generation);
-      },
-    });
-    unsubscribeConfig = connection.client.server.subscribeConfig((event) => {
-      input.store.applyConfigEvent(event);
-    });
-    void connection.client.server.getConfig().then(
-      (config) => {
-        if (!disposed && current === connection && generation === connectionGeneration) {
-          input.store.setConfig(config);
+    try {
+      const firstShellSnapshot = deferred<void>();
+      shellBatcher = createStreamBatcher({
+        onFlush: (items) => {
+          input.orchestrationStore?.applyShellItems(items);
+          reconcileActiveThreadSubscription(connection, generation);
+        },
+      });
+      unsubscribeConfig = connection.client.server.subscribeConfig((event) => {
+        input.store.applyConfigEvent(event);
+      });
+      void connection.client.server.getConfig().then(
+        (config) => {
+          if (!disposed && current === connection && generation === connectionGeneration) {
+            input.store.setConfig(config);
+          }
+        },
+        (error) => {
+          if (!disposed && current === connection && generation === connectionGeneration) {
+            input.store.setConnection("error", safeOutputText(String(error)));
+          }
+        },
+      );
+      unsubscribeLifecycle = connection.client.server.subscribeLifecycle((event) => {
+        input.store.applyLifecycleEvent(event);
+      });
+      unsubscribeShell = connection.client.orchestration.subscribeShell((item) => {
+        if (disposed || current !== connection || generation !== connectionGeneration) {
+          return;
         }
-      },
-      (error) => {
-        if (!disposed && current === connection && generation === connectionGeneration) {
-          input.store.setConnection("error", safeOutputText(String(error)));
+        input.store.applyShellItem(item);
+        shellBatcher?.push(item);
+        if (item.kind === "snapshot") {
+          shellBatcher?.flush();
+          reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
+          input.store.setConnection("connected");
+          firstShellSnapshot.resolve();
         }
-      },
-    );
-    unsubscribeLifecycle = connection.client.server.subscribeLifecycle((event) => {
-      input.store.applyLifecycleEvent(event);
-    });
-    unsubscribeShell = connection.client.orchestration.subscribeShell((item) => {
-      if (disposed || current !== connection || generation !== connectionGeneration) {
-        return;
+      });
+      if (activeThreadId) {
+        subscribeActiveThread(connection, generation, activeThreadId);
       }
-      input.store.applyShellItem(item);
-      shellBatcher?.push(item);
-      if (item.kind === "snapshot") {
-        shellBatcher?.flush();
-        reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
-        input.store.setConnection("connected");
-        firstShellSnapshot.resolve();
+      await withTimeout(
+        firstShellSnapshot.promise,
+        15_000,
+        "Timed out waiting for initial shell snapshot.",
+      );
+    } catch (error) {
+      if (current === connection) {
+        await disposeCurrent();
       }
-    });
-    if (activeThreadId) {
-      subscribeActiveThread(connection, generation, activeThreadId);
+      throw error;
     }
-    await withTimeout(
-      firstShellSnapshot.promise,
-      15_000,
-      "Timed out waiting for initial shell snapshot.",
-    );
   };
 
   const subscribeActiveThread = (
@@ -300,6 +324,9 @@ export function createTuiConnectionController(input: {
       .catch((error) => {
         clearReconnectTimer();
         input.store.setConnection("error", safeOutputText(String(error)));
+        if (!disposed) {
+          void scheduleReconnect();
+        }
       });
     return reconnectChain;
   };
@@ -318,6 +345,26 @@ export function createTuiConnectionController(input: {
     dispatchCommand: (command) => {
       if (!current) return Promise.reject(new Error("Not connected."));
       return current.client.orchestration.dispatchCommand(command);
+    },
+    getTurnDiff: (diffInput) => {
+      if (!current) return Promise.reject(new Error("Not connected."));
+      return current.client.orchestration.getTurnDiff(diffInput);
+    },
+    getFullThreadDiff: (diffInput) => {
+      if (!current) return Promise.reject(new Error("Not connected."));
+      return current.client.orchestration.getFullThreadDiff(diffInput);
+    },
+    refreshProviders: () => {
+      if (!current) return Promise.reject(new Error("Not connected."));
+      return current.client.server.refreshProviders();
+    },
+    updateSettings: (patch: ServerSettingsPatch) => {
+      if (!current) return Promise.reject(new Error("Not connected."));
+      return current.client.server.updateSettings(patch);
+    },
+    refreshGitStatus: (cwd) => {
+      if (!current) return Promise.reject(new Error("Not connected."));
+      return current.client.git.refreshStatus({ cwd });
     },
     dispose: async () => {
       disposed = true;
