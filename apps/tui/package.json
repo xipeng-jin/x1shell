@@ -1,8 +1,8 @@
 {
   "name": "@x1shell/tui",
   "version": "0.0.0-alpha.1",
-  "private": true,
   "description": "Bun-hosted OpenTUI client for X1Shell",
+  "license": "MIT",
   "bin": {
     "x1shell": "./bin/x1shell.js"
   },
@@ -12,9 +12,13 @@
     "dist"
   ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "bun run src/index.tsx",
-    "build": "tsdown",
+    "dev:headless": "X1SHELL_HEADLESS=1 bun run src/index.tsx",
+    "build": "bun run --filter t3 build && tsdown && node scripts/copy-server-dist.mjs",
     "start": "bun dist/index.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"
@@ -22,14 +26,14 @@
   "dependencies": {
     "@opentui/core": "0.1.103",
     "@opentui/react": "0.1.103",
-    "@t3tools/client-runtime": "workspace:*",
-    "@t3tools/contracts": "workspace:*",
-    "@t3tools/shared": "workspace:*",
     "react": "^19.0.0",
     "web-tree-sitter": "0.25.10",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@t3tools/client-runtime": "workspace:*",
+    "@t3tools/contracts": "workspace:*",
+    "@t3tools/shared": "workspace:*",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
     "@types/react": "^19.0.0",

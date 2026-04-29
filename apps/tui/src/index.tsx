@@ -243,21 +243,9 @@ async function runInteractive(
   const orchestrationStore = createOrchestrationStore();
   const threadDetailStore = createThreadDetailStore();
   const debugBuffer = createDebugBuffer();
-  const localSupervisor = await maybeStartLocalSupervisor(config, logger).catch((error) => {
-    serverStore.setConnection("error", safeOutputUnknown(error));
-    return null;
-  });
-  const controller = await maybeCreateAttachController(
-    config,
-    serverStore,
-    localSupervisor,
-    orchestrationStore,
-    threadDetailStore,
-  ).catch((error) => {
-    serverStore.setConnection("error", safeOutputUnknown(error));
-    return null;
-  });
-  const unsubscribeRestart = localSupervisor?.onRestarted(() => controller?.reconnect());
+  let localSupervisor: LocalManagedSupervisor | null = null;
+  let controller: Awaited<ReturnType<typeof maybeCreateAttachController>> | null = null;
+  let unsubscribeRestart: (() => void) | undefined;
 
   const render = () => {
     root.render(
@@ -386,14 +374,83 @@ async function runInteractive(
     renderer.once("destroy", unsubscribeThreadStore);
     renderer.once("destroy", unsubscribeDebugStore);
     render();
-    void controller?.connect().catch((error) => {
-      serverStore.setConnection("error", safeOutputUnknown(error));
+    void bootstrapConnection({
+      config,
+      logger,
+      serverStore,
+      orchestrationStore,
+      threadDetailStore,
+      setLocalSupervisor: (next) => {
+        localSupervisor = next;
+      },
+      setController: (next) => {
+        controller = next;
+      },
+      setUnsubscribeRestart: (next) => {
+        unsubscribeRestart = next;
+      },
+      getController: () => controller,
+      isShuttingDown: () => shuttingDown,
     });
   } catch (error) {
     root.unmount();
     renderer.destroy();
     throw error;
   }
+}
+
+async function bootstrapConnection(input: {
+  readonly config: ReturnType<typeof resolveCliConfig>;
+  readonly logger: ReturnType<typeof createLogger>;
+  readonly serverStore: ReturnType<typeof createServerConfigStore>;
+  readonly orchestrationStore: ReturnType<typeof createOrchestrationStore>;
+  readonly threadDetailStore: ReturnType<typeof createThreadDetailStore>;
+  readonly setLocalSupervisor: (supervisor: LocalManagedSupervisor | null) => void;
+  readonly setController: (
+    controller: Awaited<ReturnType<typeof maybeCreateAttachController>> | null,
+  ) => void;
+  readonly setUnsubscribeRestart: (unsubscribe: (() => void) | undefined) => void;
+  readonly getController: () => Awaited<ReturnType<typeof maybeCreateAttachController>> | null;
+  readonly isShuttingDown: () => boolean;
+}): Promise<void> {
+  if (input.isShuttingDown()) return;
+  input.serverStore.setConnection("connecting");
+
+  const localSupervisor = await maybeStartLocalSupervisor(input.config, input.logger).catch(
+    (error) => {
+      input.serverStore.setConnection("error", safeOutputUnknown(error));
+      return null;
+    },
+  );
+  if (input.isShuttingDown()) {
+    await localSupervisor?.stop();
+    return;
+  }
+  input.setLocalSupervisor(localSupervisor);
+
+  const controller = await maybeCreateAttachController(
+    input.config,
+    input.serverStore,
+    localSupervisor,
+    input.orchestrationStore,
+    input.threadDetailStore,
+  ).catch((error) => {
+    input.serverStore.setConnection("error", safeOutputUnknown(error));
+    return null;
+  });
+  if (input.isShuttingDown()) {
+    await controller?.dispose();
+    await localSupervisor?.stop();
+    return;
+  }
+  input.setController(controller);
+  input.setUnsubscribeRestart(
+    localSupervisor?.onRestarted(() => input.getController()?.reconnect()),
+  );
+
+  await controller?.connect().catch((error) => {
+    input.serverStore.setConnection("error", safeOutputUnknown(error));
+  });
 }
 
 async function maybeCreateAttachController(

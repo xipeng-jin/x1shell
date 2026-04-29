@@ -2,12 +2,13 @@ import { access, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import type { ServerCommandSpec } from "./attach.js";
 
 const execFileAsync = promisify(execFile);
 
 export type ServerCommandResolution = {
-  readonly kind: "repo-built" | "repo-source" | "packaged";
+  readonly kind: "repo-built" | "repo-source" | "packaged" | "packaged-bundled";
   readonly repoRoot?: string;
   readonly entryPath: string;
   readonly command: ServerCommandSpec;
@@ -30,6 +31,10 @@ export async function resolveServerCommand(
 ): Promise<ServerCommandResolution> {
   const accessFile = options.accessFile ?? fileExists;
   const nodeExecutable = options.nodeExecutable ?? defaultNodeExecutable();
+  const createNodeCommand = (entryPath: string): ServerCommandSpec => ({
+    executable: nodeExecutable,
+    entryArgs: [entryPath],
+  });
   if (options.explicitEntry) {
     if (!path.isAbsolute(options.explicitEntry)) {
       throw new Error("--server-entry must be an absolute path.");
@@ -41,7 +46,7 @@ export async function resolveServerCommand(
     return {
       kind: "packaged",
       entryPath: options.explicitEntry,
-      command: { executable: nodeExecutable, entryArgs: [options.explicitEntry] },
+      command: createNodeCommand(options.explicitEntry),
     };
   }
 
@@ -50,8 +55,21 @@ export async function resolveServerCommand(
     readTextFile: options.readTextFile ?? readFileUtf8,
   });
   if (!repoRoot) {
+    const packagedEntry = await findPackagedServerEntry({
+      start: path.dirname(fileURLToPath(import.meta.url)),
+      accessFile,
+      readTextFile: options.readTextFile ?? readFileUtf8,
+    });
+    if (packagedEntry) {
+      return {
+        kind: "packaged-bundled",
+        entryPath: packagedEntry,
+        command: createNodeCommand(packagedEntry),
+      };
+    }
+
     throw new Error(
-      "Could not resolve a t3 server entry from this workspace. Pass an explicit absolute --server-entry; global PATH lookup is not used.",
+      "Could not resolve a t3 server entry from this workspace or packaged TUI. Pass an explicit absolute --server-entry.",
     );
   }
 
@@ -65,7 +83,7 @@ export async function resolveServerCommand(
       kind: "repo-built",
       repoRoot,
       entryPath: builtEntry,
-      command: { executable: nodeExecutable, entryArgs: [builtEntry] },
+      command: createNodeCommand(builtEntry),
     };
   }
 
@@ -87,7 +105,7 @@ export async function resolveServerCommand(
     kind: "repo-source",
     repoRoot,
     entryPath: sourceEntry,
-    command: { executable: nodeExecutable, entryArgs: [sourceEntry] },
+    command: createNodeCommand(sourceEntry),
   };
 }
 
@@ -132,6 +150,29 @@ async function findRepoRoot(
         return current;
       }
     }
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+async function findPackagedServerEntry(input: {
+  readonly start: string;
+  readonly accessFile: (filePath: string) => Promise<boolean>;
+  readonly readTextFile: (filePath: string) => Promise<string>;
+}): Promise<string | null> {
+  let current = path.resolve(input.start);
+  while (true) {
+    const packagePath = path.join(current, "package.json");
+    if (await input.accessFile(packagePath)) {
+      const raw = await input.readTextFile(packagePath);
+      const parsed = JSON.parse(raw) as { readonly name?: string };
+      if (parsed.name === "@x1shell/tui") {
+        const entry = path.join(current, "dist/server/bin.mjs");
+        return (await input.accessFile(entry)) ? entry : null;
+      }
+    }
+
     const parent = path.dirname(current);
     if (parent === current) return null;
     current = parent;

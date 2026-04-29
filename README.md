@@ -17,6 +17,22 @@ T3 Code is a minimal web GUI for coding agents (currently Codex and Claude, more
 npx t3
 ```
 
+### X1Shell TUI
+
+Run instantly:
+
+```bash
+bunx @x1shell/tui
+```
+
+Develop from source:
+
+```bash
+cd x1shell
+bun install
+bun dev:tui
+```
+
 ### Desktop app
 
 Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:

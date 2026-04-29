@@ -6,24 +6,35 @@ The package is intentionally Codex/server-contract first: UI actions dispatch or
 
 ## Run
 
+From the source checkout, prefer the root script. It runs the TUI entry directly so Bun's workspace
+runner output does not share the terminal session with OpenTUI:
+
 ```sh
-bun run --filter @x1shell/tui dev
+bun dev:tui
+```
+
+Published package usage is through the `x1shell` bin:
+
+```sh
+bunx @x1shell/tui
+bun add -g @x1shell/tui
+x1shell
 ```
 
 Useful modes:
 
 ```sh
 # Capture one CI-safe frame without starting a server.
-bun run --filter @x1shell/tui dev -- --headless --headless-frame=/tmp/x1shell-frame.txt
+bun dev:tui -- --headless --headless-frame=/tmp/x1shell-frame.txt
 
 # Attach with a bearer token read from stdin.
-printf '%s\n' "$T3_BEARER_TOKEN" | bun run --filter @x1shell/tui dev -- --attach=http://127.0.0.1:3773 --attach-bearer-stdin
+printf '%s\n' "$T3_BEARER_TOKEN" | bun dev:tui -- --attach=http://127.0.0.1:3773 --attach-bearer-stdin
 
 # Attach with a bootstrap/pairing credential read from stdin.
-printf '%s\n' "$T3_BOOTSTRAP_TOKEN" | bun run --filter @x1shell/tui dev -- --attach=http://127.0.0.1:3773 --attach-credential-stdin
+printf '%s\n' "$T3_BOOTSTRAP_TOKEN" | bun dev:tui -- --attach=http://127.0.0.1:3773 --attach-credential-stdin
 ```
 
-The `x1shell` launcher re-execs Bun when invoked through Node. If Bun is unavailable it fails clearly; the TUI does not currently promise a Node-only runtime because OpenTUI is Bun-oriented.
+The `x1shell` launcher re-execs Bun when invoked through Node. If Bun is unavailable it fails clearly; the TUI does not currently promise a Node-only runtime because OpenTUI is Bun-oriented. In a source checkout the TUI resolves `apps/server/dist/bin.mjs` first and then `apps/server/src/bin.ts`; packaged builds include a copy of the built server under `dist/server`.
 
 ## Validation
 

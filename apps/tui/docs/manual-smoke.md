@@ -4,14 +4,14 @@ Run these checks before treating a live TUI release as ready. They are intention
 
 ## Local-Managed Mode
 
-1. Start the TUI with a clean temp base dir and an explicit server entry:
+1. Start the TUI from source with a clean temp base dir:
 
    ```sh
    X1SHELL_CONFIG_HOME=/tmp/x1shell-smoke/config \
    X1SHELL_DATA_HOME=/tmp/x1shell-smoke/data \
    X1SHELL_CACHE_HOME=/tmp/x1shell-smoke/cache \
    X1SHELL_STATE_HOME=/tmp/x1shell-smoke/state \
-   bun run --filter @x1shell/tui dev -- --server-entry="$(pwd)/apps/server/dist/bin.mjs" --new-server
+   bun dev:tui -- --new-server
    ```
 
 2. Confirm the status line moves from startup to connected.
@@ -24,7 +24,7 @@ Run these checks before treating a live TUI release as ready. They are intention
 2. Attach with a bearer token through stdin:
 
    ```sh
-   printf '%s\n' "$T3_BEARER_TOKEN" | bun run --filter @x1shell/tui dev -- --attach=http://127.0.0.1:3773 --attach-bearer-stdin
+   printf '%s\n' "$T3_BEARER_TOKEN" | bun dev:tui -- --attach=http://127.0.0.1:3773 --attach-bearer-stdin
    ```
 
 3. Repeat with a bootstrap credential and `--attach-credential-stdin`.
@@ -33,7 +33,7 @@ Run these checks before treating a live TUI release as ready. They are intention
 ## Headless Frame Capture
 
 ```sh
-bun run --filter @x1shell/tui dev -- --headless --headless-width=120 --headless-height=28 --headless-frame=/tmp/x1shell-frame.txt
+bun dev:tui -- --headless --headless-width=120 --headless-height=28 --headless-frame=/tmp/x1shell-frame.txt
 ```
 
 Confirm the frame contains `X1Shell`, dimensions, and no raw secrets or OSC 8 hyperlink escapes.

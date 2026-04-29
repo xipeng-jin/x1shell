@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { resolveServerCommand, supportsNodeSourceEntry } from "./serverCommand.js";
 
 const root = "/repo/x1shell";
@@ -80,13 +81,35 @@ describe("server command resolution", () => {
     ).rejects.toThrow(/Built server CLI entry is required/);
   });
 
+  it("uses the packaged bundled server when outside a source checkout", async () => {
+    const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+    const packagedEntry = path.join(packageRoot, "dist/server/bin.mjs");
+    await expect(
+      resolveServerCommand({
+        cwd: "/tmp/outside",
+        nodeExecutable: "/usr/bin/node",
+        accessFile: fakeAccessAbsolute([path.join(packageRoot, "package.json"), packagedEntry]),
+        readTextFile: async (filePath) => {
+          if (filePath === path.join(packageRoot, "package.json")) {
+            return JSON.stringify({ name: "@x1shell/tui" });
+          }
+          throw new Error(`unexpected read: ${filePath}`);
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "packaged-bundled",
+      entryPath: packagedEntry,
+      command: { executable: "/usr/bin/node", entryArgs: [packagedEntry] },
+    });
+  });
+
   it("rejects missing repo roots without falling back to global t3", async () => {
     await expect(
       resolveServerCommand({
         cwd: "/tmp/outside",
         accessFile: fakeAccess([]),
       }),
-    ).rejects.toThrow(/global PATH lookup is not used/);
+    ).rejects.toThrow(/explicit absolute --server-entry/);
   });
 
   it("accepts explicit absolute packaged entries and rejects legacy entries", async () => {
