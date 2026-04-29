@@ -126,7 +126,7 @@ function seedHeadlessFixture(
   orchestrationStore: ReturnType<typeof createOrchestrationStore>,
   threadDetailStore: ReturnType<typeof createThreadDetailStore>,
 ) {
-  if (env.X1SHELL_HEADLESS_PHASE6_FIXTURE !== "1") return;
+  if (env.X1SHELL_HEADLESS_FIXTURE !== "1") return;
   serverStore.setConnection("connected");
   orchestrationStore.applyShellItem({
     kind: "snapshot",

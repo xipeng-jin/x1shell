@@ -59,6 +59,7 @@ import {
   canAppendComposerAttachment,
   canHandlePrintableShortcut,
   composerAttachmentLimitMessage,
+  appendPaletteQuery,
   isPlainTextSequence,
   parseComposerAttachmentInput,
 } from "./input.js";
@@ -267,7 +268,7 @@ export function App(props: {
         return;
       }
       if (isPlainTextSequence(key)) {
-        setPaletteQuery((query) => `${query}${key.sequence}`);
+        setPaletteQuery((query) => appendPaletteQuery(query, key.sequence));
         return;
       }
     }

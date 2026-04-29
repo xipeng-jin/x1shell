@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import type { ChildProcess } from "node:child_process";
@@ -301,6 +302,60 @@ describe("local managed supervisor", () => {
     await supervisor.stop();
   });
 
+  it("validates local-managed startup against a real loopback readiness/auth server", async () => {
+    const entry = await makeEntry();
+    const child = makeChild();
+    const spawnMock = vi.fn(() => child as ChildProcess);
+    const server = await startTestServer((request, response) => {
+      const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+      if (path === "/.well-known/t3/environment") {
+        writeJson(response, descriptor);
+        return;
+      }
+      if (path === "/api/auth/bootstrap/bearer") {
+        expect(request.method).toBe("POST");
+        writeJson(response, {
+          authenticated: true,
+          role: "owner",
+          sessionMethod: "bearer-session-token",
+          sessionToken: "bearer-secret",
+          expiresAt: "2026-05-01T00:00:00.000Z",
+        });
+        return;
+      }
+      if (path === "/api/auth/session") {
+        expect(request.headers.authorization).toBe("Bearer bearer-secret");
+        writeJson(response, { authenticated: true, auth: { mode: "desktop" }, role: "owner" });
+        return;
+      }
+      if (path === "/api/auth/ws-token") {
+        expect(request.headers.authorization).toBe("Bearer bearer-secret");
+        writeJson(response, { token: "ws-secret", expiresAt: "2026-05-01T00:00:00.000Z" });
+        return;
+      }
+      response.writeHead(404).end("not found");
+    });
+
+    try {
+      const supervisor = await startLocalManagedSupervisor({
+        baseDir: "/tmp/t3",
+        serverEntry: entry,
+        newServer: true,
+        spawnProcess: spawnMock as never,
+        resolvePort: async () => server.port,
+      });
+
+      expect(supervisor.owned).toBe(true);
+      expect(supervisor.target.httpBaseUrl).toBe(`http://127.0.0.1:${server.port}/`);
+      await expect(
+        (supervisor.target.webSocketUrlProvider as () => Promise<string>)(),
+      ).resolves.toBe(`ws://127.0.0.1:${server.port}/ws?wsToken=ws-secret`);
+      await supervisor.stop();
+    } finally {
+      await server.close();
+    }
+  });
+
   it("classifies exits for restart policy", () => {
     expect(classifyExit({ code: 0, signal: null })).toBe("requested");
     expect(classifyExit({ code: null, signal: "SIGTERM" })).toBe("requested");
@@ -370,4 +425,32 @@ async function createTempDir(): Promise<string> {
   const parent = process.env.TMPDIR ?? resolve(process.cwd(), "../../.tmp/tui-tests");
   await mkdir(parent, { recursive: true });
   return mkdtemp(join(parent, "x1shell-supervisor-"));
+}
+
+function startTestServer(
+  handler: (request: IncomingMessage, response: ServerResponse) => void,
+): Promise<{ readonly port: number; readonly close: () => Promise<void> }> {
+  const server = createServer(handler);
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("test server did not bind to a TCP port"));
+        return;
+      }
+      resolve({
+        port: address.port,
+        close: () =>
+          new Promise<void>((closeResolve, closeReject) => {
+            server.close((error) => (error ? closeReject(error) : closeResolve()));
+          }),
+      });
+    });
+  });
+}
+
+function writeJson(response: ServerResponse, value: unknown): void {
+  response.writeHead(200, { "content-type": "application/json" });
+  response.end(JSON.stringify(value));
 }

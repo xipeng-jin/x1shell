@@ -11,6 +11,7 @@ import {
   canAppendComposerAttachment,
   canHandlePrintableShortcut,
   composerAttachmentLimitMessage,
+  appendPaletteQuery,
   isPlainTextSequence,
   parseComposerAttachmentInput,
 } from "./input.js";
@@ -54,7 +55,7 @@ describe("App headless smoke", () => {
   });
 
   it("renders shell projects, threads, detail, composer, and sanitized text", () => {
-    const dir = createTempDir("x1shell-tui-phase6-");
+    const dir = createTempDir("x1shell-tui-fixture-");
     const framePath = join(dir, "frame.txt");
 
     execFileSync(
@@ -71,7 +72,7 @@ describe("App headless smoke", () => {
         cwd: process.cwd(),
         env: {
           ...process.env,
-          X1SHELL_HEADLESS_PHASE6_FIXTURE: "1",
+          X1SHELL_HEADLESS_FIXTURE: "1",
           X1SHELL_CONFIG_HOME: join(dir, "config"),
           X1SHELL_DATA_HOME: join(dir, "data"),
           X1SHELL_CACHE_HOME: join(dir, "cache"),
@@ -137,6 +138,22 @@ describe("App headless smoke", () => {
       dataUrl: "data:image/png;base64,iVBORw==",
     });
     expect(parseComposerAttachmentInput("data:image/png;base64,QUJD", null)).toBeNull();
+  });
+
+  it("sanitizes and bounds pasted command palette query text", () => {
+    const query = appendPaletteQuery(
+      "",
+      `open\u001b]8;;https://evil.example\u0007link\u001b]8;;\u0007 token=palette-secret`,
+    );
+
+    expect(query).toContain("open");
+    expect(query).toContain("link");
+    expect(query).not.toContain("\u001b]8");
+    expect(query).not.toContain("evil.example");
+    expect(query).not.toContain("palette-secret");
+
+    const hugeDataUrl = `data:image/png;base64,${"A".repeat(10_000)}`;
+    expect(appendPaletteQuery("", hugeDataUrl)).toHaveLength(160);
   });
 
   it("bounds composer image attachment count to the provider contract", () => {

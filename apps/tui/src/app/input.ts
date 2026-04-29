@@ -3,7 +3,10 @@ import {
   type ProjectId,
   type UploadChatAttachment,
 } from "@t3tools/contracts";
+import { displayText } from "../domain/display.js";
 import { parseImageAttachmentText } from "../terminal/images.js";
+
+const MAX_PALETTE_QUERY_LENGTH = 160;
 
 export interface TuiKeyboardKey {
   readonly name: string;
@@ -45,4 +48,8 @@ export function canAppendComposerAttachment(attachments: readonly UploadChatAtta
 
 export function composerAttachmentLimitMessage(): string {
   return `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images per message.`;
+}
+
+export function appendPaletteQuery(existing: string, sequence: string): string {
+  return displayText(`${existing}${sequence}`).slice(0, MAX_PALETTE_QUERY_LENGTH);
 }

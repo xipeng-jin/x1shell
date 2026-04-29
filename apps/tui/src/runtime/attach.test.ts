@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join, resolve } from "node:path";
 import type { ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vitest";
@@ -142,6 +143,52 @@ describe("attach runtime", () => {
         options: { fetchOptions: { fetch: fetchMock as unknown as typeof fetch } },
       }),
     ).rejects.toThrow(/not authenticated/);
+  });
+
+  it("validates bootstrap attach flow against a real loopback server and real fetch", async () => {
+    const server = await startTestServer((request, response) => {
+      const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+      if (path === "/.well-known/t3/environment") {
+        writeJson(response, descriptor);
+        return;
+      }
+      if (path === "/api/auth/bootstrap/bearer") {
+        expect(request.method).toBe("POST");
+        writeJson(response, {
+          authenticated: true,
+          role: "owner",
+          sessionMethod: "bearer-session-token",
+          sessionToken: "bearer-secret",
+          expiresAt: "2026-05-01T00:00:00.000Z",
+        });
+        return;
+      }
+      if (path === "/api/auth/session") {
+        expect(request.headers.authorization).toBe("Bearer bearer-secret");
+        writeJson(response, { authenticated: true, auth: { mode: "remote" }, role: "owner" });
+        return;
+      }
+      if (path === "/api/auth/ws-token") {
+        expect(request.headers.authorization).toBe("Bearer bearer-secret");
+        writeJson(response, { token: "ws-secret", expiresAt: "2026-05-01T00:00:00.000Z" });
+        return;
+      }
+      response.writeHead(404).end("not found");
+    });
+
+    try {
+      const target = await resolveBootstrapAttachTarget({
+        baseUrl: `http://127.0.0.1:${server.port}`,
+        credential: "pairing-secret",
+      });
+
+      expect(target.sessionRole).toBe("owner");
+      await expect((target.webSocketUrlProvider as () => Promise<string>)()).resolves.toBe(
+        `ws://127.0.0.1:${server.port}/ws?wsToken=ws-secret`,
+      );
+    } finally {
+      await server.close();
+    }
   });
 
   it("derives normal and dev-scoped state roots like the server", () => {
@@ -310,4 +357,32 @@ async function createTempDir(): Promise<string> {
   const parent = process.env.TMPDIR ?? resolve(process.cwd(), "../../.tmp/tui-tests");
   await mkdir(parent, { recursive: true });
   return mkdtemp(join(parent, "x1shell-attach-"));
+}
+
+function startTestServer(
+  handler: (request: IncomingMessage, response: ServerResponse) => void,
+): Promise<{ readonly port: number; readonly close: () => Promise<void> }> {
+  const server = createServer(handler);
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("test server did not bind to a TCP port"));
+        return;
+      }
+      resolve({
+        port: address.port,
+        close: () =>
+          new Promise<void>((closeResolve, closeReject) => {
+            server.close((error) => (error ? closeReject(error) : closeResolve()));
+          }),
+      });
+    });
+  });
+}
+
+function writeJson(response: ServerResponse, value: unknown): void {
+  response.writeHead(200, { "content-type": "application/json" });
+  response.end(JSON.stringify(value));
 }

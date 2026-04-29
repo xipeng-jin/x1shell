@@ -8,6 +8,8 @@ export function DiffPanel(props: {
   readonly error?: string | null;
   readonly theme: TuiTheme;
 }): React.ReactNode {
+  const renderedLines = props.text.split("\n").slice(0, 16).map(diffLineWithUniqueKey());
+
   return (
     <box border borderColor={props.theme.palette.border} paddingLeft={1} flexDirection="column">
       <text fg={props.theme.palette.accent} attributes={1}>
@@ -15,14 +17,23 @@ export function DiffPanel(props: {
       </text>
       {props.loading ? <text fg={props.theme.palette.muted}>Loading diff...</text> : null}
       {props.error ? <text fg={props.theme.palette.danger}>{props.error}</text> : null}
-      {props.text
-        .split("\n")
-        .slice(0, 16)
-        .map((line) => (
-          <text key={line} fg={props.theme.palette.text}>
-            {line}
-          </text>
-        ))}
+      {renderedLines.map(({ key, line }) => (
+        <text key={key} fg={props.theme.palette.text}>
+          {line}
+        </text>
+      ))}
     </box>
   );
+}
+
+function diffLineWithUniqueKey(): (line: string) => {
+  readonly key: string;
+  readonly line: string;
+} {
+  const occurrenceByLine = new Map<string, number>();
+  return (line) => {
+    const occurrence = occurrenceByLine.get(line) ?? 0;
+    occurrenceByLine.set(line, occurrence + 1);
+    return { key: `${line}:${occurrence}`, line };
+  };
 }
