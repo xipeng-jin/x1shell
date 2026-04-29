@@ -47,11 +47,14 @@ describe("App headless smoke", () => {
     const frame = readFileSync(framePath, "utf8");
 
     expect(frame).toContain("X1Shell");
-    expect(frame).toContain("110x24");
+    expect(frame).toContain("ALPHA");
+    expect(frame).toContain("PROJECTS");
+    expect(frame).toContain("Ask anything or @tag files/folders");
     expect(frame).toContain("Waiting for shell snapshot.");
     expect(frame).not.toContain("secret");
-    expect(frame).toContain("X1SHELL_TOKEN=[");
-    expect(frame).toContain("REDACTED]/config");
+    expect(frame).not.toContain("shell seq");
+    expect(frame).not.toContain("X1SHELL_TOKEN");
+    expect(frame).not.toContain("help/palette");
   });
 
   it("renders shell projects, threads, detail, composer, and sanitized text", () => {
@@ -83,13 +86,19 @@ describe("App headless smoke", () => {
     );
 
     const frame = readFileSync(framePath, "utf8");
-    expect(frame).toContain("Project");
+    expect(frame).toContain("X1Shell");
+    expect(frame).toContain("ALPHA");
+    expect(frame).toContain("PROJECTS");
     expect(frame).toContain("Thread Shell Fresh");
     expect(frame).not.toContain("Thread Detail Stale");
     expect(frame).toContain("assistant");
     expect(frame).toContain("hello link");
     expect(frame).toContain("Plan with");
     expect(frame).toContain("draft");
+    expect(frame).toContain("Local");
+    expect(frame).not.toContain("Threads");
+    expect(frame).not.toContain("shell seq");
+    expect(frame).not.toContain("Message agent");
     expect(frame).not.toContain("\u001b]8");
     expect(frame).not.toContain("evil.example");
     expect(frame).not.toContain("plan-secret");

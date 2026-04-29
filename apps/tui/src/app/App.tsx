@@ -11,6 +11,8 @@ import {
   type OrchestrationGetFullThreadDiffResult,
   type OrchestrationGetTurnDiffInput,
   type OrchestrationGetTurnDiffResult,
+  type OrchestrationThread,
+  type OrchestrationThreadShell,
   type ProviderInteractionMode,
   type ProjectId,
   type RuntimeMode,
@@ -80,6 +82,7 @@ import { DiffPanel } from "../ui/DiffPanel.js";
 import { ErrorBanners } from "../ui/ErrorBanners.js";
 import { KeyboardHelp } from "../ui/KeyboardHelp.js";
 import { SettingsPanel } from "../ui/SettingsPanel.js";
+import { resolveX1ShellLandingLayout } from "../ui/landing/responsiveLayout.js";
 
 const MAX_DIFF_CACHE_ENTRIES = 12;
 
@@ -124,7 +127,10 @@ export function App(props: {
   onRequestExit: () => void;
 }): React.ReactNode {
   const dimensions = useTerminalDimensions();
-  const compact = dimensions.width < 96;
+  const layout = resolveX1ShellLandingLayout({
+    viewportColumns: dimensions.width,
+    sidebarCollapsedPreference: false,
+  });
   const status = props.serverStatus ?? DEFAULT_STATUS;
   const shell = props.shellState ?? DEFAULT_SHELL;
   const activeThreadShell = shell.selectedThreadId
@@ -761,39 +767,22 @@ export function App(props: {
     <box
       width="100%"
       height="100%"
-      flexDirection="column"
+      flexDirection="row"
       backgroundColor={props.theme.palette.canvas}
     >
-      <box
-        height={3}
-        paddingLeft={2}
-        paddingRight={2}
-        border
-        borderColor={props.theme.palette.border}
-      >
-        <text fg={props.theme.palette.accent} attributes={1}>
-          {`X1Shell | ${dimensions.width}x${dimensions.height} | ${status.connection} | shell seq ${shell.lastAppliedSequence}`}
-        </text>
-      </box>
-      <ErrorBanners banners={banners} theme={props.theme} />
-
-      <box flexGrow={1} flexDirection={compact ? "column" : "row"}>
-        <Sidebar shell={shell} compact={compact} theme={props.theme} />
-        <box flexGrow={1} paddingLeft={2} paddingTop={1} paddingRight={2}>
-          <ThreadHeader thread={activeThreadHeader} theme={props.theme} />
-          <ControlsPanel
-            provider={selectedProvider}
-            modelSelection={selectedModelSelection}
-            runtimeMode={selectedRuntimeMode}
-            interactionMode={selectedInteractionMode}
-            attachmentCount={draftAttachments.length}
-            theme={props.theme}
-          />
-          {gitStatus ? (
-            <text fg={props.theme.palette.muted}>
-              {`git ${displayText(gitStatus.branch ?? "detached")} files ${gitStatus.workingTree.files.length} +${gitStatus.workingTree.insertions} -${gitStatus.workingTree.deletions}`}
-            </text>
-          ) : null}
+      {layout.showSidebar ? <Sidebar shell={shell} layout={layout} theme={props.theme} /> : null}
+      <box flexGrow={1} flexDirection="column" backgroundColor={props.theme.palette.main}>
+        <MainHeader
+          thread={activeThreadHeader}
+          projectTitle={activeProject ? displayProject(activeProject).title : null}
+          showProjectBadge={layout.showHeaderProjectBadge}
+          showSidebarToggle={layout.showSidebarToggle}
+          showSidebar={layout.showSidebar}
+          gitStatus={gitStatus}
+          theme={props.theme}
+        />
+        <ErrorBanners banners={banners} theme={props.theme} />
+        <box flexGrow={1} paddingLeft={2} paddingRight={2} paddingTop={2} flexDirection="column">
           {visiblePanel === "palette" ? (
             <CommandPalette
               actions={paletteActions}
@@ -815,58 +804,31 @@ export function App(props: {
             <DebugPanel entries={props.debugEntries ?? []} theme={props.theme} />
           ) : visiblePanel === "settings" ? (
             <SettingsPanel config={status.config} theme={props.theme} />
-          ) : null}
-          <box flexGrow={1} flexDirection="column">
-            {timeline.length === 0 ? (
-              <text fg={props.theme.palette.muted}>
-                {status.connection === "connected"
-                  ? "No messages yet."
-                  : "Waiting for shell snapshot."}
-              </text>
-            ) : (
-              timeline.slice(-18).map((entry) =>
-                entry.kind === "message" ? (
-                  <box key={entry.key} flexDirection="column" marginBottom={1}>
-                    <text fg={props.theme.palette.muted}>{entry.role}</text>
-                    <SafeMarkdown fg={props.theme.palette.text} content={entry.markdown} />
-                  </box>
-                ) : (
-                  <text key={entry.key} fg={props.theme.palette.muted}>
-                    {entry.text}
-                  </text>
-                ),
-              )
-            )}
-          </box>
+          ) : (
+            <ConversationArea
+              timeline={timeline}
+              connected={status.connection === "connected"}
+              theme={props.theme}
+            />
+          )}
         </box>
-      </box>
-
-      <box
-        height={activePendingApproval || activePendingUserInput ? 9 : 5}
-        paddingLeft={2}
-        paddingRight={2}
-        border
-        borderColor={props.theme.palette.border}
-      >
-        {activePendingApproval ? (
-          <PendingApprovalPanel approval={activePendingApproval} theme={props.theme} />
-        ) : activePendingUserInput ? (
-          <PendingUserInputPanel
-            pending={activePendingUserInput}
-            questionIndex={activeQuestionIndex}
-            customAnswers={customInputAnswers}
-            selectedOptions={selectedInputOptions}
-            theme={props.theme}
-          />
-        ) : null}
-        <text
-          fg={props.theme.palette.muted}
-        >{`?/^p help/palette | ↑/↓ select | ^n new | d diff | ^d debug | m/r/i controls | a archive | s stop | enter send`}</text>
-        <text fg={props.theme.palette.muted}>
-          {compactConfigPath(displayText(props.paths.configDir))}
-        </text>
-        <input focused value={composerText} placeholder="Message agent..." />
-        {submitError ? <text fg={props.theme.palette.danger}>{submitError}</text> : null}
+        <ComposerPanel
+          composerText={composerText}
+          submitError={submitError}
+          provider={selectedProvider}
+          modelSelection={selectedModelSelection}
+          runtimeMode={selectedRuntimeMode}
+          interactionMode={selectedInteractionMode}
+          attachmentCount={draftAttachments.length}
+          branch={activeThreadHeader?.branch ?? gitStatus?.branch ?? null}
+          activePendingApproval={activePendingApproval}
+          activePendingUserInput={activePendingUserInput}
+          activeQuestionIndex={activeQuestionIndex}
+          customInputAnswers={customInputAnswers}
+          selectedInputOptions={selectedInputOptions}
+          isRunning={activeThreadHeader?.session?.status === "running"}
+          theme={props.theme}
+        />
       </box>
     </box>
   );
@@ -927,87 +889,284 @@ function PendingUserInputPanel(props: {
   );
 }
 
-function Sidebar(props: { shell: TuiShellState; compact: boolean; theme: TuiTheme }) {
+function Sidebar(props: {
+  shell: TuiShellState;
+  layout: ReturnType<typeof resolveX1ShellLandingLayout>;
+  theme: TuiTheme;
+}) {
   return (
     <box
-      width={props.compact ? "100%" : 34}
-      height={props.compact ? 9 : "100%"}
-      paddingLeft={2}
-      paddingTop={1}
+      width={props.layout.sidebarWidth}
+      height="100%"
       border
-      borderColor={props.theme.palette.border}
-      backgroundColor={props.theme.palette.panel}
+      borderColor={props.theme.palette.divider}
+      backgroundColor={props.theme.palette.sidebar}
       flexDirection="column"
     >
-      <text fg={props.theme.palette.text} attributes={1}>
-        Projects
-      </text>
-      {props.shell.projects.slice(0, 4).map((project) => {
-        const display = displayProject(project);
-        return (
-          <text
-            key={project.id}
-            fg={
-              project.id === props.shell.selectedProjectId
-                ? props.theme.palette.accent
-                : props.theme.palette.muted
-            }
-          >
-            {display.title}
-          </text>
-        );
-      })}
-      <text fg={props.theme.palette.text} attributes={1}>
-        Threads
-      </text>
-      {props.shell.threads
-        .filter(
-          (thread) => !thread.archivedAt && thread.projectId === props.shell.selectedProjectId,
-        )
-        .slice(0, 12)
-        .map((thread) => {
-          const display = displayThread(thread);
+      <box height={3} paddingLeft={2} paddingRight={2} alignItems="center" flexDirection="row">
+        {props.layout.showWindowDots ? <WindowDots theme={props.theme} /> : null}
+        <text fg={props.theme.palette.text}>{props.layout.sidebarTitle}</text>
+        {props.layout.showSidebarAlphaBadge ? <Badge label="ALPHA" theme={props.theme} /> : null}
+      </box>
+      <box flexGrow={1} paddingLeft={1} paddingRight={1} flexDirection="column">
+        <box height={2} paddingLeft={1} paddingRight={1} flexDirection="row">
+          <text fg={props.theme.palette.subtle}>PROJECTS</text>
+          <box flexGrow={1} />
+          <text fg={props.theme.palette.muted}>⇅</text>
+          <text fg={props.theme.palette.muted}> +</text>
+        </box>
+        {props.shell.projects.length === 0 ? (
+          <box paddingLeft={1} paddingTop={1}>
+            <text fg={props.theme.palette.muted}>Add a workspace path to start.</text>
+          </box>
+        ) : null}
+        {props.shell.projects.slice(0, 8).map((project) => {
+          const display = displayProject(project);
+          const isActive = project.id === props.shell.selectedProjectId;
+          const projectThreads = props.shell.threads
+            .filter((thread) => !thread.archivedAt && thread.projectId === project.id)
+            .slice(0, 8);
           return (
-            <text
-              key={thread.id}
-              fg={
-                thread.id === props.shell.selectedThreadId
-                  ? props.theme.palette.accent
-                  : props.theme.palette.muted
-              }
-            >
-              {`${thread.id === props.shell.selectedThreadId ? "> " : "  "}${display.title}`}
-            </text>
+            <box key={project.id} flexDirection="column">
+              <box
+                height={1}
+                paddingLeft={1}
+                paddingRight={1}
+                backgroundColor={isActive ? props.theme.palette.panelMuted : "transparent"}
+                flexDirection="row"
+              >
+                <text fg={props.theme.palette.muted}>
+                  {projectThreads.length > 0 ? "▾ " : "  "}
+                </text>
+                <text fg={props.theme.palette.text}>{`▰ ${display.title}`}</text>
+                <box flexGrow={1} />
+                <text fg={props.theme.palette.muted}>+</text>
+              </box>
+              {projectThreads.map((thread) => {
+                const threadDisplay = displayThread(thread);
+                return (
+                  <box
+                    key={thread.id}
+                    height={1}
+                    paddingLeft={3}
+                    paddingRight={1}
+                    backgroundColor={
+                      thread.id === props.shell.selectedThreadId
+                        ? props.theme.palette.panelMuted
+                        : "transparent"
+                    }
+                    flexDirection="row"
+                  >
+                    <text
+                      fg={
+                        thread.id === props.shell.selectedThreadId
+                          ? props.theme.palette.text
+                          : props.theme.palette.muted
+                      }
+                    >
+                      {threadDisplay.title}
+                    </text>
+                    <box flexGrow={1} />
+                    <text fg={props.theme.palette.muted}>{relativeTime(thread.updatedAt)}</text>
+                  </box>
+                );
+              })}
+            </box>
           );
         })}
+      </box>
+      <box height={4} paddingLeft={2} flexDirection="column">
+        <text fg={props.theme.palette.muted}>⚙ Settings</text>
+        <text fg={props.theme.palette.muted}>⌨ Keybindings</text>
+      </box>
     </box>
   );
 }
 
-function ThreadHeader(props: {
-  thread: ReturnType<typeof displayThread> extends never
-    ? never
-    : Parameters<typeof displayThread>[0] | null | undefined;
+function MainHeader(props: {
+  thread: OrchestrationThreadShell | OrchestrationThread | null | undefined;
+  projectTitle: string | null;
+  showProjectBadge: boolean;
+  showSidebarToggle: boolean;
+  showSidebar: boolean;
+  gitStatus: GitStatusResult | null;
   theme: TuiTheme;
 }) {
-  if (!props.thread) {
-    return (
-      <text fg={props.theme.palette.text} attributes={1}>
-        New thread
-      </text>
-    );
-  }
-  const display = displayThread(props.thread);
+  const title = props.thread ? displayThread(props.thread).title : "Project overview";
   return (
-    <box flexDirection="column" marginBottom={1}>
-      <text fg={props.theme.palette.text} attributes={1}>
-        {display.title}
+    <box
+      height={3}
+      paddingLeft={props.showSidebarToggle ? 1 : 2}
+      paddingRight={2}
+      border
+      borderColor={props.theme.palette.divider}
+      backgroundColor={props.theme.palette.main}
+      flexDirection="row"
+      alignItems="center"
+    >
+      {props.showSidebarToggle ? (
+        <text fg={props.theme.palette.muted}>{props.showSidebar ? "✕ " : "☰ "}</text>
+      ) : null}
+      <text fg={props.theme.palette.text}>{title}</text>
+      {props.showProjectBadge && props.projectTitle ? (
+        <Badge label={props.projectTitle} theme={props.theme} />
+      ) : null}
+      <box flexGrow={1} />
+      <text
+        fg={
+          props.gitStatus && props.gitStatus.workingTree.files.length > 0
+            ? props.theme.palette.success
+            : props.theme.palette.muted
+        }
+      >
+        󰊢
       </text>
-      <text fg={props.theme.palette.muted}>
-        {`${display.provider}/${display.model} | ${display.session}${display.branch ? ` | ${display.branch}` : ""}`}
-      </text>
+      <text fg={props.theme.palette.muted}> ⊞</text>
     </box>
   );
+}
+
+function ConversationArea(props: {
+  timeline: ReturnType<ReturnType<typeof createConversationDisplayCache>["buildTimeline"]>;
+  connected: boolean;
+  theme: TuiTheme;
+}) {
+  return (
+    <scrollbox flexGrow={1} paddingRight={1}>
+      {props.timeline.length === 0 ? (
+        <text fg={props.theme.palette.muted}>
+          {props.connected ? "No messages yet." : "Waiting for shell snapshot."}
+        </text>
+      ) : (
+        props.timeline.slice(-18).map((entry) =>
+          entry.kind === "message" ? (
+            <box key={entry.key} flexDirection="column" marginBottom={1}>
+              <text fg={props.theme.palette.muted}>{entry.role}</text>
+              <SafeMarkdown fg={props.theme.palette.text} content={entry.markdown} />
+            </box>
+          ) : (
+            <text key={entry.key} fg={props.theme.palette.muted}>
+              {entry.text}
+            </text>
+          ),
+        )
+      )}
+    </scrollbox>
+  );
+}
+
+function ComposerPanel(props: {
+  composerText: string;
+  submitError: string | null;
+  provider: ServerProvider | null;
+  modelSelection: ModelSelection | null;
+  runtimeMode: RuntimeMode;
+  interactionMode: ProviderInteractionMode;
+  attachmentCount: number;
+  branch: string | null;
+  activePendingApproval: ReturnType<typeof derivePendingApprovals>[number] | null;
+  activePendingUserInput: ReturnType<typeof derivePendingUserInputs>[number] | null;
+  activeQuestionIndex: number;
+  customInputAnswers: Readonly<Record<string, string>>;
+  selectedInputOptions: Readonly<Record<string, readonly number[]>>;
+  isRunning: boolean;
+  theme: TuiTheme;
+}) {
+  return (
+    <box
+      height={props.activePendingApproval || props.activePendingUserInput ? 12 : 8}
+      paddingLeft={2}
+      paddingRight={2}
+      paddingBottom={1}
+    >
+      <box
+        flexGrow={1}
+        border
+        borderColor={props.theme.palette.border}
+        backgroundColor={props.theme.palette.composerPanel}
+        paddingLeft={1}
+        paddingRight={1}
+        flexDirection="column"
+      >
+        {props.activePendingApproval ? (
+          <PendingApprovalPanel approval={props.activePendingApproval} theme={props.theme} />
+        ) : props.activePendingUserInput ? (
+          <PendingUserInputPanel
+            pending={props.activePendingUserInput}
+            questionIndex={props.activeQuestionIndex}
+            customAnswers={props.customInputAnswers}
+            selectedOptions={props.selectedInputOptions}
+            theme={props.theme}
+          />
+        ) : (
+          <textarea
+            key={props.composerText}
+            focused
+            initialValue={props.composerText}
+            placeholder="Ask anything or @tag files/folders"
+          />
+        )}
+        <box height={1} flexDirection="row" alignItems="center">
+          <ControlsPanel
+            provider={props.provider}
+            modelSelection={props.modelSelection}
+            runtimeMode={props.runtimeMode}
+            interactionMode={props.interactionMode}
+            attachmentCount={props.attachmentCount}
+            theme={props.theme}
+          />
+          <box flexGrow={1} />
+          <text fg={props.isRunning ? props.theme.palette.danger : props.theme.palette.muted}>
+            {props.isRunning ? "■" : "↑"}
+          </text>
+        </box>
+        {props.submitError ? (
+          <text fg={props.theme.palette.danger}>{props.submitError}</text>
+        ) : null}
+        <box height={1} flexDirection="row" alignItems="center">
+          <text fg={props.theme.palette.muted}>▰ Local</text>
+          <box flexGrow={1} />
+          <text fg={props.theme.palette.muted}>{`⑂ ${displayText(props.branch ?? "main")}`}</text>
+        </box>
+      </box>
+    </box>
+  );
+}
+
+function WindowDots(props: { theme: TuiTheme }) {
+  return (
+    <box width={6} flexDirection="row">
+      <text fg={props.theme.palette.danger}>●</text>
+      <text fg={props.theme.palette.warning}> ●</text>
+      <text fg={props.theme.palette.success}> ● </text>
+    </box>
+  );
+}
+
+function Badge(props: { label: string; theme: TuiTheme }) {
+  return (
+    <box
+      marginLeft={1}
+      paddingLeft={1}
+      paddingRight={1}
+      backgroundColor={props.theme.palette.panelMuted}
+    >
+      <text fg={props.theme.palette.muted}>{props.label}</text>
+    </box>
+  );
+}
+
+function relativeTime(value: string | null | undefined): string {
+  if (!value) return "";
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return "now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 function findProvider(
@@ -1031,13 +1190,6 @@ function filterPaletteActions(query: string) {
       .toLowerCase()
       .includes(normalized),
   );
-}
-
-function compactConfigPath(path: string): string {
-  const marker = "X1SHELL_TOKEN=[REDACTED]";
-  const index = path.indexOf(marker);
-  if (index < 0) return path;
-  return `${marker}${path.slice(index + marker.length)}`;
 }
 
 function withBoundedDiffCache(

@@ -2,12 +2,21 @@ export interface TuiTheme {
   id: string;
   palette: {
     canvas: string;
+    sidebar: string;
+    main: string;
+    surface: string;
+    composerPanel: string;
+    divider: string;
     panel: string;
     panelMuted: string;
     border: string;
     text: string;
     muted: string;
+    subtle: string;
     accent: string;
+    success: string;
+    warning: string;
+    info: string;
     danger: string;
   };
 }
@@ -15,13 +24,22 @@ export interface TuiTheme {
 const DEFAULT_THEME: TuiTheme = {
   id: "default",
   palette: {
-    canvas: "#101820",
-    panel: "#16212b",
-    panelMuted: "#1f2d38",
-    border: "#34505f",
-    text: "#e8f1f2",
-    muted: "#8fa7b3",
-    accent: "#f2b84b",
+    canvas: "#171717",
+    sidebar: "#151515",
+    main: "#1c1c1c",
+    surface: "#202020",
+    composerPanel: "#1f1f1f",
+    divider: "#343434",
+    panel: "#202020",
+    panelMuted: "#2a2a2a",
+    border: "#3a3a3a",
+    text: "#e7e4dc",
+    muted: "#8d8a84",
+    subtle: "#62605b",
+    accent: "#d6d3cb",
+    success: "#2ecc71",
+    warning: "#f2b84b",
+    info: "#4da3ff",
     danger: "#ff6b6b",
   },
 };
