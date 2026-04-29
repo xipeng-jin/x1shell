@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   captureProcessListeners,
@@ -36,5 +37,20 @@ describe("renderer lifecycle", () => {
     expect(process.rawListeners("uncaughtException")).toContain(preservedUncaught);
     expect(process.rawListeners("uncaughtException")).not.toContain(rawUncaught);
     expect(process.rawListeners("unhandledRejection")).not.toContain(rawRejection);
+  });
+
+  it("keeps OpenTUI input and resize listeners bounded across store updates", () => {
+    const output = execFileSync("bun", ["run", "src/test/openTuiListenerLeakSmoke.tsx"], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      stdio: "pipe",
+    });
+    expect(output).not.toContain("Possible EventTarget memory leak");
+
+    const result = JSON.parse(output.trim()) as {
+      baseline: Record<"keypress" | "resize" | "selection", number>;
+      after: Record<"keypress" | "resize" | "selection", number>;
+    };
+    expect(result.after).toEqual(result.baseline);
   });
 });

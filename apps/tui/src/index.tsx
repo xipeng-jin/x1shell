@@ -4,6 +4,7 @@ import { createCliRenderer } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { createRoot } from "@opentui/react";
 import { App } from "./app/App.js";
+import { TuiRuntimeApp } from "./app/TuiRuntimeApp.js";
 import { resolveCliConfig } from "./cli/config.js";
 import { readPreferences } from "./cli/preferences.js";
 import { resolveBearerAttachTarget, resolveBootstrapAttachTarget } from "./runtime/attach.js";
@@ -247,68 +248,6 @@ async function runInteractive(
   let controller: Awaited<ReturnType<typeof maybeCreateAttachController>> | null = null;
   let unsubscribeRestart: (() => void) | undefined;
 
-  const render = () => {
-    root.render(
-      <App
-        interruptRequestToken={interruptRequestToken}
-        paths={config.paths}
-        theme={theme}
-        serverStatus={serverStore.getSnapshot()}
-        shellState={orchestrationStore.getSnapshot()}
-        threadDetailState={threadDetailStore.getSnapshot()}
-        debugEntries={debugBuffer.getSnapshot()}
-        onSelectNextThread={(direction) => {
-          orchestrationStore.selectNextThread(direction);
-          controller?.setActiveThread(orchestrationStore.getSnapshot().selectedThreadId);
-        }}
-        onNewThread={() => {
-          orchestrationStore.createProjectDraft();
-          controller?.setActiveThread(null);
-        }}
-        onDraftChange={(projectId, draft) => orchestrationStore.setDraft(projectId, draft)}
-        onDraftContextChange={(projectId, context) =>
-          orchestrationStore.setDraftContext(projectId, context)
-        }
-        onDraftAttachmentsChange={(projectId, attachments) =>
-          orchestrationStore.setDraftAttachments(projectId, attachments)
-        }
-        onPromoteProjectDraft={(projectId, threadId) => {
-          orchestrationStore.promoteProjectDraft(projectId, threadId);
-          controller?.setActiveThread(threadId);
-        }}
-        onSubmitCommand={(command) => {
-          if (!controller) return Promise.reject(new Error("Not connected."));
-          debugBuffer.push("info", "dispatch command", { type: command.type });
-          return controller.dispatchCommand(command);
-        }}
-        onReconnect={async () => {
-          debugBuffer.push("info", "manual reconnect");
-          await controller?.reconnect();
-        }}
-        onRefreshProviders={async () => {
-          debugBuffer.push("info", "refresh providers");
-          await controller?.refreshProviders();
-        }}
-        onGetTurnDiff={(input) => {
-          debugBuffer.push("info", "load turn diff", input);
-          if (!controller) return Promise.reject(new Error("Not connected."));
-          return controller.getTurnDiff(input);
-        }}
-        onGetFullThreadDiff={(input) => {
-          debugBuffer.push("info", "load full thread diff", input);
-          if (!controller) return Promise.reject(new Error("Not connected."));
-          return controller.getFullThreadDiff(input);
-        }}
-        onRefreshGitStatus={(cwd) => {
-          debugBuffer.push("info", "refresh git status", { cwd });
-          if (!controller) return Promise.reject(new Error("Not connected."));
-          return controller.refreshGitStatus(cwd);
-        }}
-        onRequestExit={() => void shutdown(0)}
-      />,
-    );
-  };
-
   const shutdown = async (code = 0, error?: unknown) => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -365,15 +304,54 @@ async function runInteractive(
   });
 
   try {
-    const unsubscribeServerStore = serverStore.subscribe(() => render());
-    const unsubscribeShellStore = orchestrationStore.subscribe(() => render());
-    const unsubscribeThreadStore = threadDetailStore.subscribe(() => render());
-    const unsubscribeDebugStore = debugBuffer.subscribe(() => render());
-    renderer.once("destroy", unsubscribeServerStore);
-    renderer.once("destroy", unsubscribeShellStore);
-    renderer.once("destroy", unsubscribeThreadStore);
-    renderer.once("destroy", unsubscribeDebugStore);
-    render();
+    root.render(
+      <TuiRuntimeApp
+        interruptRequestToken={interruptRequestToken}
+        paths={config.paths}
+        theme={theme}
+        serverStore={serverStore}
+        orchestrationStore={orchestrationStore}
+        threadDetailStore={threadDetailStore}
+        debugBuffer={debugBuffer}
+        onSelectNextThread={(direction) => {
+          orchestrationStore.selectNextThread(direction);
+          controller?.setActiveThread(orchestrationStore.getSnapshot().selectedThreadId);
+        }}
+        onNewThread={() => {
+          orchestrationStore.createProjectDraft();
+          controller?.setActiveThread(null);
+        }}
+        onSubmitCommand={(command) => {
+          if (!controller) return Promise.reject(new Error("Not connected."));
+          debugBuffer.push("info", "dispatch command", { type: command.type });
+          return controller.dispatchCommand(command);
+        }}
+        onReconnect={async () => {
+          debugBuffer.push("info", "manual reconnect");
+          await controller?.reconnect();
+        }}
+        onRefreshProviders={async () => {
+          debugBuffer.push("info", "refresh providers");
+          await controller?.refreshProviders();
+        }}
+        onGetTurnDiff={(input) => {
+          debugBuffer.push("info", "load turn diff", input);
+          if (!controller) return Promise.reject(new Error("Not connected."));
+          return controller.getTurnDiff(input);
+        }}
+        onGetFullThreadDiff={(input) => {
+          debugBuffer.push("info", "load full thread diff", input);
+          if (!controller) return Promise.reject(new Error("Not connected."));
+          return controller.getFullThreadDiff(input);
+        }}
+        onRefreshGitStatus={(cwd) => {
+          debugBuffer.push("info", "refresh git status", { cwd });
+          if (!controller) return Promise.reject(new Error("Not connected."));
+          return controller.refreshGitStatus(cwd);
+        }}
+        onRequestExit={() => void shutdown(0)}
+      />,
+    );
     void bootstrapConnection({
       config,
       logger,
