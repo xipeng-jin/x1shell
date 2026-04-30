@@ -2,6 +2,7 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   type ClientOrchestrationCommand,
@@ -11,6 +12,7 @@ import {
   type OrchestrationGetFullThreadDiffResult,
   type OrchestrationGetTurnDiffInput,
   type OrchestrationGetTurnDiffResult,
+  type OrchestrationProjectShell,
   type OrchestrationThread,
   type OrchestrationThreadShell,
   type ProviderInteractionMode,
@@ -44,7 +46,7 @@ import {
   sanitizeDiffText,
   type TuiDiffMode,
 } from "../domain/diff.js";
-import { deriveErrorBanners } from "../domain/errors.js";
+import { deriveErrorBanners, type TuiErrorBanner } from "../domain/errors.js";
 import { TUI_ACTIONS, type TuiActionId } from "../domain/keybindings.js";
 import {
   createConversationDisplayCache,
@@ -76,15 +78,33 @@ import type { ThreadDetailState } from "../state/threadDetailStore.js";
 import { SafeMarkdown } from "../terminal/safeMarkdown.js";
 import type { TuiTheme } from "../terminal/theme.js";
 import { CommandPalette } from "../ui/CommandPalette.js";
-import { ControlsPanel } from "../ui/ControlsPanel.js";
 import { DebugPanel } from "../ui/DebugPanel.js";
 import { DiffPanel } from "../ui/DiffPanel.js";
-import { ErrorBanners } from "../ui/ErrorBanners.js";
 import { KeyboardHelp } from "../ui/KeyboardHelp.js";
 import { SettingsPanel } from "../ui/SettingsPanel.js";
 import { resolveX1ShellLandingLayout } from "../ui/landing/responsiveLayout.js";
 
 const MAX_DIFF_CACHE_ENTRIES = 12;
+const HEADER_THREAD_TITLE_MAX_LENGTH = 44;
+const SIDEBAR_THREAD_TIMESTAMP_WIDTH = 4;
+const SIDEBAR_TREE_INDENT_WIDTH = 1;
+const SIDEBAR_ROW_HORIZONTAL_PADDING = 2;
+const SIDEBAR_THREAD_STATUS_WIDTH = 2;
+const SIDEBAR_THREAD_TIMESTAMP_GAP = 1;
+const SIDEBAR_THREAD_LAYOUT_BUFFER = 1;
+const SIDEBAR_THREAD_TITLE_WIDTH =
+  34 -
+  SIDEBAR_TREE_INDENT_WIDTH -
+  SIDEBAR_ROW_HORIZONTAL_PADDING -
+  SIDEBAR_THREAD_STATUS_WIDTH -
+  SIDEBAR_THREAD_TIMESTAMP_GAP -
+  SIDEBAR_THREAD_TIMESTAMP_WIDTH -
+  SIDEBAR_THREAD_LAYOUT_BUFFER;
+const COMPOSER_TEXTAREA_MIN_HEIGHT = 3;
+const COMPOSER_TEXTAREA_MAX_HEIGHT = 8;
+const COMPOSER_PENDING_TEXTAREA_MIN_HEIGHT = 2;
+
+type LandingFocusArea = "projects" | "threads" | "timeline" | "composer" | "controls";
 
 type DraftControlContext = {
   readonly modelSelection?: ModelSelection;
@@ -99,7 +119,10 @@ export function App(props: {
   serverStatus?: TuiServerStatusSnapshot;
   shellState?: TuiShellState;
   threadDetailState?: ThreadDetailState;
+  onSelectProject?: (projectId: ProjectId) => void;
+  onSelectThread?: (threadId: ThreadId) => void;
   onSelectNextThread?: (direction: 1 | -1) => void;
+  onCreateProjectDraft?: (projectId: ProjectId) => void;
   onNewThread?: () => void;
   onDraftChange?: (projectId: ProjectId, draft: string) => void;
   onDraftContextChange?: (
@@ -127,9 +150,12 @@ export function App(props: {
   onRequestExit: () => void;
 }): React.ReactNode {
   const dimensions = useTerminalDimensions();
+  const [sidebarCollapsedPreference, setSidebarCollapsedPreference] = useState(false);
+  const [sidebarOverlayOpen, setSidebarOverlayOpen] = useState(false);
+  const [focusArea, setFocusArea] = useState<LandingFocusArea>("composer");
   const layout = resolveX1ShellLandingLayout({
     viewportColumns: dimensions.width,
-    sidebarCollapsedPreference: false,
+    sidebarCollapsedPreference,
   });
   const status = props.serverStatus ?? DEFAULT_STATUS;
   const shell = props.shellState ?? DEFAULT_SHELL;
@@ -178,6 +204,9 @@ export function App(props: {
   const [selectedInputOptions, setSelectedInputOptions] = useState<
     Record<string, readonly number[]>
   >({});
+  const [expandedProjectIds, setExpandedProjectIds] = useState<ReadonlySet<string>>(
+    () => new Set(shell.selectedProjectId ? [shell.selectedProjectId] : []),
+  );
   const composerText = draftProjectId ? draft : localDraft;
   const displayCache = useMemo(() => createConversationDisplayCache({ windowSize: 40 }), []);
   const timeline = useMemo(
@@ -202,11 +231,15 @@ export function App(props: {
     ? (threadControlContextById[activeThreadHeader.id] ?? {})
     : {};
   const selectedControlContext = activeThreadHeader ? threadControlContext : projectDraftContext;
+  const defaultModelSelection: ModelSelection = {
+    provider: "codex",
+    model: DEFAULT_MODEL_BY_PROVIDER.codex,
+  };
   const selectedModelSelection =
     selectedControlContext.modelSelection ??
     activeThreadHeader?.modelSelection ??
     activeProject?.defaultModelSelection ??
-    null;
+    defaultModelSelection;
   const selectedRuntimeMode =
     selectedControlContext.runtimeMode ?? activeThreadHeader?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const selectedInteractionMode =
@@ -217,6 +250,15 @@ export function App(props: {
   const banners = deriveErrorBanners({ status, provider: selectedProvider });
   const paletteActions = useMemo(() => filterPaletteActions(paletteQuery), [paletteQuery]);
   activeDiffThreadIdRef.current = activeDetail?.id ?? null;
+
+  useEffect(() => {
+    const selectedProjectId = shell.selectedProjectId ?? activeProject?.id;
+    if (!selectedProjectId) return;
+    setExpandedProjectIds((existing) => {
+      if (existing.has(selectedProjectId)) return existing;
+      return new Set([...existing, selectedProjectId]);
+    });
+  }, [activeProject?.id, shell.selectedProjectId]);
 
   useEffect(() => {
     diffRequestRef.current += 1;
@@ -353,12 +395,42 @@ export function App(props: {
       return;
     }
     if (key.ctrl && key.name === "p") {
-      setVisiblePanel(visiblePanel === "palette" ? null : "palette");
-      setPaletteQuery("");
+      setVisiblePanel(null);
+      setFocusArea("composer");
+      props.onNewThread?.();
+      return;
+    }
+    if (key.ctrl && key.name === "b") {
+      if (layout.sidebarForcedCollapsed) {
+        setSidebarOverlayOpen((current) => !current);
+      } else {
+        setSidebarCollapsedPreference((current) => !current);
+      }
       return;
     }
     if (key.ctrl && key.name === "d") {
       setVisiblePanel(visiblePanel === "debug" ? null : "debug");
+      setFocusArea("timeline");
+      return;
+    }
+    if (key.name === "tab") {
+      setFocusArea((current) => nextFocusArea(current, layout.showSidebar || sidebarOverlayOpen));
+      return;
+    }
+    if (composerText.length === 0 && focusArea === "projects" && key.name === "up") {
+      selectAdjacentProject(-1);
+      return;
+    }
+    if (composerText.length === 0 && focusArea === "projects" && key.name === "down") {
+      selectAdjacentProject(1);
+      return;
+    }
+    if (composerText.length === 0 && focusArea === "threads" && key.name === "up") {
+      selectAdjacentVisibleThread(-1);
+      return;
+    }
+    if (composerText.length === 0 && focusArea === "threads" && key.name === "down") {
+      selectAdjacentVisibleThread(1);
       return;
     }
     if (
@@ -366,6 +438,7 @@ export function App(props: {
       canHandlePrintableShortcut({ composerText, visiblePanel, keyName: key.name })
     ) {
       setVisiblePanel(visiblePanel === "settings" ? null : "settings");
+      setFocusArea("timeline");
       return;
     }
     if (
@@ -373,6 +446,7 @@ export function App(props: {
       canHandlePrintableShortcut({ composerText, visiblePanel, keyName: key.name })
     ) {
       setVisiblePanel(visiblePanel === "diff" ? null : "diff");
+      setFocusArea("timeline");
       return;
     }
     if (
@@ -491,6 +565,32 @@ export function App(props: {
 
   function setDraftAttachments(attachments: readonly UploadChatAttachment[]) {
     if (draftProjectId) props.onDraftAttachmentsChange?.(draftProjectId, attachments);
+  }
+
+  function selectAdjacentProject(direction: 1 | -1) {
+    const projects = sortedProjects(shell.projects);
+    if (projects.length === 0) return;
+    const currentIndex = shell.selectedProjectId
+      ? projects.findIndex((project) => project.id === shell.selectedProjectId)
+      : -1;
+    const nextIndex =
+      currentIndex < 0 ? 0 : (currentIndex + direction + projects.length) % projects.length;
+    const project = projects[nextIndex];
+    if (!project) return;
+    props.onSelectProject?.(project.id);
+  }
+
+  function selectAdjacentVisibleThread(direction: 1 | -1) {
+    const threads = sortedVisibleThreads(shell);
+    if (threads.length === 0) return;
+    const currentIndex = shell.selectedThreadId
+      ? threads.findIndex((thread) => thread.id === shell.selectedThreadId)
+      : -1;
+    const nextIndex =
+      currentIndex < 0 ? 0 : (currentIndex + direction + threads.length) % threads.length;
+    const thread = threads[nextIndex];
+    if (!thread) return;
+    props.onSelectThread?.(thread.id);
   }
 
   async function submit() {
@@ -769,20 +869,98 @@ export function App(props: {
       height="100%"
       flexDirection="row"
       backgroundColor={props.theme.palette.canvas}
+      position="relative"
     >
-      {layout.showSidebar ? <Sidebar shell={shell} layout={layout} theme={props.theme} /> : null}
+      {sidebarOverlayOpen ? (
+        <box
+          position="absolute"
+          left={0}
+          top={0}
+          bottom={0}
+          right={0}
+          zIndex={40}
+          backgroundColor={props.theme.palette.scrim}
+          onMouseDown={() => setSidebarOverlayOpen(false)}
+        />
+      ) : null}
+      {layout.showSidebar || sidebarOverlayOpen ? (
+        <Sidebar
+          shell={shell}
+          layout={sidebarOverlayOpen ? overlaySidebarLayout(layout) : layout}
+          overlay={sidebarOverlayOpen}
+          focusArea={focusArea}
+          expandedProjectIds={expandedProjectIds}
+          onToggleProject={(projectId) => {
+            setFocusArea("projects");
+            setExpandedProjectIds((existing) => {
+              const next = new Set(existing);
+              if (next.has(projectId)) next.delete(projectId);
+              else next.add(projectId);
+              return next;
+            });
+            props.onSelectProject?.(projectId);
+            if (sidebarOverlayOpen) setSidebarOverlayOpen(false);
+          }}
+          onCreateProjectDraft={(projectId) => {
+            setFocusArea("composer");
+            props.onCreateProjectDraft?.(projectId);
+            setSidebarOverlayOpen(false);
+          }}
+          onCreateFirstProjectDraft={() => {
+            setFocusArea("composer");
+            props.onNewThread?.();
+            setSidebarOverlayOpen(false);
+          }}
+          onSelectThread={(threadId) => {
+            setFocusArea("threads");
+            props.onSelectThread?.(threadId);
+            setSidebarOverlayOpen(false);
+          }}
+          onOpenSettings={() => {
+            setVisiblePanel("settings");
+            setFocusArea("timeline");
+            setSidebarOverlayOpen(false);
+          }}
+          onOpenKeybindings={() => {
+            setVisiblePanel("help");
+            setFocusArea("timeline");
+            setSidebarOverlayOpen(false);
+          }}
+          theme={props.theme}
+        />
+      ) : null}
       <box flexGrow={1} flexDirection="column" backgroundColor={props.theme.palette.main}>
         <MainHeader
           thread={activeThreadHeader}
           projectTitle={activeProject ? displayProject(activeProject).title : null}
           showProjectBadge={layout.showHeaderProjectBadge}
           showSidebarToggle={layout.showSidebarToggle}
-          showSidebar={layout.showSidebar}
+          showSidebar={layout.showSidebar || sidebarOverlayOpen}
+          onToggleSidebar={() => {
+            setFocusArea("projects");
+            if (layout.sidebarForcedCollapsed) {
+              setSidebarOverlayOpen((current) => !current);
+            } else {
+              setSidebarCollapsedPreference((current) => !current);
+            }
+          }}
+          onToggleDiff={() => void performAction("diff.toggle")}
+          onRefreshGit={() => void performAction("git.refresh")}
+          viewportColumns={dimensions.width}
           gitStatus={gitStatus}
+          diffActive={visiblePanel === "diff"}
+          focusArea={focusArea}
+          onFocusControls={() => setFocusArea("controls")}
           theme={props.theme}
         />
-        <ErrorBanners banners={banners} theme={props.theme} />
-        <box flexGrow={1} paddingLeft={2} paddingRight={2} paddingTop={2} flexDirection="column">
+        <box
+          flexGrow={1}
+          paddingLeft={2}
+          paddingRight={2}
+          paddingTop={1}
+          flexDirection="column"
+          onMouseDown={() => setFocusArea("timeline")}
+        >
           {visiblePanel === "palette" ? (
             <CommandPalette
               actions={paletteActions}
@@ -808,6 +986,9 @@ export function App(props: {
             <ConversationArea
               timeline={timeline}
               connected={status.connection === "connected"}
+              banners={banners}
+              showStartupCard={Boolean(!activeProject && !activeThreadHeader && !draftProjectId)}
+              focused={focusArea === "timeline"}
               theme={props.theme}
             />
           )}
@@ -821,12 +1002,26 @@ export function App(props: {
           interactionMode={selectedInteractionMode}
           attachmentCount={draftAttachments.length}
           branch={activeThreadHeader?.branch ?? gitStatus?.branch ?? null}
+          showWorkspaceFooter={Boolean(draftProjectId && (gitStatus || activeThreadHeader?.branch))}
+          hasActiveThread={Boolean(activeThreadHeader)}
+          hasDraftThread={Boolean(draftProjectId && !activeThreadHeader)}
           activePendingApproval={activePendingApproval}
           activePendingUserInput={activePendingUserInput}
           activeQuestionIndex={activeQuestionIndex}
           customInputAnswers={customInputAnswers}
           selectedInputOptions={selectedInputOptions}
           isRunning={activeThreadHeader?.session?.status === "running"}
+          layout={layout}
+          viewportColumns={dimensions.width}
+          onCycleModel={() => void performAction("model.next")}
+          onCycleRuntime={() => void performAction("runtime.next")}
+          onCycleInteraction={() => void performAction("interaction.next")}
+          onPrimaryAction={() => void performAction("message.send")}
+          onStop={() => void performAction("thread.stop")}
+          focused={focusArea === "composer"}
+          controlsFocused={focusArea === "controls"}
+          onFocusComposer={() => setFocusArea("composer")}
+          onFocusControls={() => setFocusArea("controls")}
           theme={props.theme}
         />
       </box>
@@ -839,14 +1034,27 @@ function PendingApprovalPanel(props: {
   theme: TuiTheme;
 }) {
   return (
-    <box flexDirection="column">
-      <text
-        fg={props.theme.palette.accent}
-      >{`Approval: ${displayText(props.approval.requestKind)}`}</text>
+    <box
+      backgroundColor={props.theme.palette.surfaceWarn}
+      paddingLeft={1}
+      paddingRight={1}
+      paddingTop={1}
+      paddingBottom={1}
+      marginBottom={1}
+      flexDirection="column"
+    >
+      <text fg={props.theme.palette.warning}>
+        {`approval required · ${displayText(props.approval.requestKind)}`}
+      </text>
       {props.approval.detail ? (
         <text fg={props.theme.palette.muted}>{displayText(props.approval.detail)}</text>
       ) : null}
-      <text fg={props.theme.palette.muted}>y accept | s session | n decline | c cancel</text>
+      <box marginTop={1} flexDirection="row">
+        <ActionPill label="Cancel" shortcut="c" theme={props.theme} />
+        <ActionPill label="Decline" shortcut="n" theme={props.theme} />
+        <ActionPill label="Always allow" shortcut="s" theme={props.theme} />
+        <ActionPill active label="Approve once" shortcut="y" theme={props.theme} />
+      </box>
     </box>
   );
 }
@@ -867,24 +1075,36 @@ function PendingUserInputPanel(props: {
   const selected = props.selectedOptions[question.id] ?? [];
   const customAnswer = props.customAnswers[question.id] ?? "";
   return (
-    <box flexDirection="column">
+    <box
+      backgroundColor={props.theme.palette.surfaceInfo}
+      paddingLeft={1}
+      paddingRight={1}
+      paddingTop={1}
+      paddingBottom={1}
+      marginBottom={1}
+      flexDirection="column"
+    >
       <text fg={props.theme.palette.accent}>
-        {`Question ${questionIndex + 1}/${props.pending.questions.length}: ${displayText(question.header)}`}
+        {`input requested · ${questionIndex + 1}/${props.pending.questions.length} · ${displayText(question.header)}`}
       </text>
       <text fg={props.theme.palette.text}>{displayText(question.question)}</text>
-      <text fg={props.theme.palette.muted}>
-        {question.options
-          .slice(0, 9)
-          .map(
-            (option, index) =>
-              `${index + 1}${selected.includes(index) ? "*" : ""}:${displayText(option.label)}`,
-          )
-          .join("  ")}
-      </text>
-      <text fg={props.theme.palette.muted}>{`custom: ${displayText(customAnswer)}`}</text>
-      <text fg={props.theme.palette.muted}>
-        left/right question | enter submits answered questions
-      </text>
+      {question.options.length > 0 ? (
+        <box marginTop={1} flexDirection="row" overflow="hidden">
+          {question.options.slice(0, 4).map((option, index) => (
+            <ActionPill
+              key={option.label}
+              active={selected.includes(index)}
+              label={displayText(option.label)}
+              shortcut={`${index + 1}`}
+              theme={props.theme}
+            />
+          ))}
+        </box>
+      ) : null}
+      {customAnswer ? (
+        <text fg={props.theme.palette.muted}>{`custom: ${displayText(customAnswer)}`}</text>
+      ) : null}
+      <text fg={props.theme.palette.subtle}>left/right question · enter submit</text>
     </box>
   );
 }
@@ -892,13 +1112,25 @@ function PendingUserInputPanel(props: {
 function Sidebar(props: {
   shell: TuiShellState;
   layout: ReturnType<typeof resolveX1ShellLandingLayout>;
+  overlay?: boolean;
+  focusArea: LandingFocusArea;
+  expandedProjectIds: ReadonlySet<string>;
+  onToggleProject: (projectId: ProjectId) => void;
+  onCreateProjectDraft: (projectId: ProjectId) => void;
+  onCreateFirstProjectDraft: () => void;
+  onSelectThread: (threadId: ThreadId) => void;
+  onOpenSettings: () => void;
+  onOpenKeybindings: () => void;
   theme: TuiTheme;
 }) {
+  const projects = sortedProjects(props.shell.projects);
+  const focused = props.focusArea === "projects" || props.focusArea === "threads";
   return (
     <box
       width={props.layout.sidebarWidth}
       height="100%"
-      border
+      {...(props.overlay ? { position: "absolute" as const, left: 0, top: 0, zIndex: 50 } : {})}
+      border={["right"]}
       borderColor={props.theme.palette.divider}
       backgroundColor={props.theme.palette.sidebar}
       flexDirection="column"
@@ -908,76 +1140,130 @@ function Sidebar(props: {
         <text fg={props.theme.palette.text}>{props.layout.sidebarTitle}</text>
         {props.layout.showSidebarAlphaBadge ? <Badge label="ALPHA" theme={props.theme} /> : null}
       </box>
-      <box flexGrow={1} paddingLeft={1} paddingRight={1} flexDirection="column">
-        <box height={2} paddingLeft={1} paddingRight={1} flexDirection="row">
-          <text fg={props.theme.palette.subtle}>PROJECTS</text>
-          <box flexGrow={1} />
-          <text fg={props.theme.palette.muted}>⇅</text>
-          <text fg={props.theme.palette.muted}> +</text>
-        </box>
+      <scrollbox flexGrow={1} paddingLeft={1} paddingRight={1} focused={focused}>
+        <SectionLabel
+          label="PROJECTS"
+          actions={[
+            { icon: "⇅", active: false, disabled: true },
+            { icon: "+", active: false, onPress: props.onCreateFirstProjectDraft },
+          ]}
+          theme={props.theme}
+        />
         {props.shell.projects.length === 0 ? (
-          <box paddingLeft={1} paddingTop={1}>
-            <text fg={props.theme.palette.muted}>Add a workspace path to start.</text>
+          <box paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1}>
+            <text fg={props.theme.palette.muted}>
+              Add a workspace path to start. The current folder is prefilled.
+            </text>
           </box>
         ) : null}
-        {props.shell.projects.slice(0, 8).map((project) => {
+        {projects.map((project) => {
           const display = displayProject(project);
           const isActive = project.id === props.shell.selectedProjectId;
           const projectThreads = props.shell.threads
             .filter((thread) => !thread.archivedAt && thread.projectId === project.id)
-            .slice(0, 8);
+            .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+          const isExpanded = props.expandedProjectIds.has(project.id);
+          const projectStatus = resolveProjectStatus(projectThreads);
           return (
             <box key={project.id} flexDirection="column">
-              <box
-                height={1}
-                paddingLeft={1}
-                paddingRight={1}
-                backgroundColor={isActive ? props.theme.palette.panelMuted : "transparent"}
-                flexDirection="row"
+              <SidebarRow
+                active={isActive || (props.focusArea === "projects" && isActive)}
+                activeBackgroundColor={props.theme.palette.controlActive}
+                onPress={() => props.onToggleProject(project.id)}
+                theme={props.theme}
               >
-                <text fg={props.theme.palette.muted}>
-                  {projectThreads.length > 0 ? "▾ " : "  "}
+                <text
+                  fg={
+                    projectStatus && !isExpanded ? projectStatus.color : props.theme.palette.subtle
+                  }
+                >
+                  {!isExpanded && projectStatus ? "●" : isExpanded ? "▾" : "▸"}
                 </text>
-                <text fg={props.theme.palette.text}>{`▰ ${display.title}`}</text>
+                <text fg={props.theme.palette.muted}> 󰉋 </text>
+                <box width={22} overflow="hidden" height={1}>
+                  <text fg={isActive ? props.theme.palette.text : props.theme.palette.muted}>
+                    {truncateTitleForDisplay(display.title, 22)}
+                  </text>
+                </box>
                 <box flexGrow={1} />
-                <text fg={props.theme.palette.muted}>+</text>
-              </box>
-              {projectThreads.map((thread) => {
-                const threadDisplay = displayThread(thread);
-                return (
-                  <box
-                    key={thread.id}
-                    height={1}
-                    paddingLeft={3}
-                    paddingRight={1}
-                    backgroundColor={
-                      thread.id === props.shell.selectedThreadId
-                        ? props.theme.palette.panelMuted
-                        : "transparent"
-                    }
-                    flexDirection="row"
-                  >
-                    <text
-                      fg={
-                        thread.id === props.shell.selectedThreadId
-                          ? props.theme.palette.text
-                          : props.theme.palette.muted
-                      }
-                    >
-                      {threadDisplay.title}
-                    </text>
-                    <box flexGrow={1} />
-                    <text fg={props.theme.palette.muted}>{relativeTime(thread.updatedAt)}</text>
-                  </box>
-                );
-              })}
+                <IconButton
+                  icon="+"
+                  active={false}
+                  onPress={() => props.onCreateProjectDraft(project.id)}
+                  theme={props.theme}
+                />
+              </SidebarRow>
+              {isExpanded ? (
+                <box marginLeft={1} flexDirection="column">
+                  {projectThreads.length > 0 ? (
+                    projectThreads.map((thread) => {
+                      const threadDisplay = displayThread(thread);
+                      const isThreadActive = thread.id === props.shell.selectedThreadId;
+                      const status = resolveThreadStatus(thread);
+                      return (
+                        <SidebarRow
+                          key={thread.id}
+                          active={
+                            isThreadActive || (props.focusArea === "threads" && isThreadActive)
+                          }
+                          activeBackgroundColor={props.theme.palette.controlActiveStrong}
+                          onPress={() => props.onSelectThread(thread.id)}
+                          theme={props.theme}
+                        >
+                          <box width={1} marginRight={1} alignItems="center">
+                            {status ? <text fg={status.color}>●</text> : null}
+                          </box>
+                          <box width={SIDEBAR_THREAD_TITLE_WIDTH} overflow="hidden" height={1}>
+                            <text
+                              fg={
+                                isThreadActive
+                                  ? props.theme.palette.text
+                                  : props.theme.palette.muted
+                              }
+                            >
+                              {truncateTitleForDisplay(
+                                threadDisplay.title,
+                                SIDEBAR_THREAD_TITLE_WIDTH,
+                              )}
+                            </text>
+                          </box>
+                          <box
+                            width={SIDEBAR_THREAD_TIMESTAMP_WIDTH}
+                            marginLeft={SIDEBAR_THREAD_TIMESTAMP_GAP}
+                          >
+                            <text
+                              fg={
+                                isThreadActive
+                                  ? props.theme.palette.muted
+                                  : props.theme.palette.subtle
+                              }
+                            >
+                              {relativeTime(thread.updatedAt)}
+                            </text>
+                          </box>
+                        </SidebarRow>
+                      );
+                    })
+                  ) : (
+                    <box paddingLeft={2} paddingRight={1}>
+                      <text fg={props.theme.palette.subtle}>No threads yet</text>
+                    </box>
+                  )}
+                </box>
+              ) : null}
             </box>
           );
         })}
-      </box>
-      <box height={4} paddingLeft={2} flexDirection="column">
-        <text fg={props.theme.palette.muted}>⚙ Settings</text>
-        <text fg={props.theme.palette.muted}>⌨ Keybindings</text>
+      </scrollbox>
+      <box paddingLeft={1} paddingRight={1} paddingTop={1} paddingBottom={1} flexDirection="column">
+        <SidebarRow suppressHighlight onPress={props.onOpenSettings} theme={props.theme}>
+          <text fg={props.theme.palette.muted}>󰒓 </text>
+          <text fg={props.theme.palette.muted}>Settings</text>
+        </SidebarRow>
+        <SidebarRow suppressHighlight onPress={props.onOpenKeybindings} theme={props.theme}>
+          <text fg={props.theme.palette.muted}>󰌌 </text>
+          <text fg={props.theme.palette.muted}>Keybindings</text>
+        </SidebarRow>
       </box>
     </box>
   );
@@ -989,39 +1275,104 @@ function MainHeader(props: {
   showProjectBadge: boolean;
   showSidebarToggle: boolean;
   showSidebar: boolean;
+  onToggleSidebar: () => void;
+  onToggleDiff: () => void;
+  onRefreshGit: () => void;
+  viewportColumns: number;
   gitStatus: GitStatusResult | null;
+  diffActive: boolean;
+  focusArea: LandingFocusArea;
+  onFocusControls: () => void;
   theme: TuiTheme;
 }) {
-  const title = props.thread ? displayThread(props.thread).title : "Project overview";
+  const fallbackTitle = props.projectTitle ?? "New thread";
+  const title = truncateTitleForDisplay(
+    props.thread ? displayThread(props.thread).title : fallbackTitle,
+    headerTitleMaxLength({
+      viewportColumns: props.viewportColumns,
+      showSidebarToggle: props.showSidebarToggle,
+      showHeaderProjectBadge: props.showProjectBadge,
+    }),
+  );
   return (
     <box
+      width="100%"
       height={3}
       paddingLeft={props.showSidebarToggle ? 1 : 2}
-      paddingRight={2}
-      border
+      paddingRight={0}
+      paddingTop={1}
+      paddingBottom={1}
+      border={["bottom"]}
       borderColor={props.theme.palette.divider}
       backgroundColor={props.theme.palette.main}
       flexDirection="row"
       alignItems="center"
+      position="relative"
     >
-      {props.showSidebarToggle ? (
-        <text fg={props.theme.palette.muted}>{props.showSidebar ? "✕ " : "☰ "}</text>
-      ) : null}
-      <text fg={props.theme.palette.text}>{title}</text>
-      {props.showProjectBadge && props.projectTitle ? (
-        <Badge label={props.projectTitle} theme={props.theme} />
-      ) : null}
-      <box flexGrow={1} />
-      <text
-        fg={
-          props.gitStatus && props.gitStatus.workingTree.files.length > 0
-            ? props.theme.palette.success
-            : props.theme.palette.muted
-        }
+      <box
+        flexDirection="row"
+        alignItems="center"
+        flexShrink={1}
+        minWidth={0}
+        overflow="hidden"
+        height={1}
       >
-        󰊢
-      </text>
-      <text fg={props.theme.palette.muted}> ⊞</text>
+        {props.showSidebarToggle ? (
+          <ToolbarButton
+            icon={props.showSidebar ? "✕" : "☰"}
+            compact
+            marginRight={1}
+            onPress={props.onToggleSidebar}
+            theme={props.theme}
+          />
+        ) : null}
+        <box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden" height={1}>
+          <text fg={props.theme.palette.text}>{title}</text>
+        </box>
+        {props.showProjectBadge && props.projectTitle ? (
+          <Badge label={props.projectTitle} theme={props.theme} />
+        ) : null}
+      </box>
+      <box position="absolute" right={1} flexDirection="row" alignItems="center" flexShrink={0}>
+        <ToolbarButton
+          icon="󰊢"
+          compact
+          chrome="bare"
+          width={4}
+          justifyContent="flex-end"
+          iconColor={
+            props.gitStatus && props.gitStatus.workingTree.files.length > 0
+              ? props.theme.palette.success
+              : props.theme.palette.muted
+          }
+          disabled={!props.gitStatus}
+          active={props.focusArea === "controls"}
+          onPress={() => {
+            props.onFocusControls();
+            props.onRefreshGit();
+          }}
+          theme={props.theme}
+        />
+        <ToolbarButton
+          icon=""
+          compact
+          chrome="bare"
+          width={4}
+          justifyContent="flex-start"
+          active={props.diffActive || props.focusArea === "controls"}
+          iconColor={
+            props.diffActive || props.focusArea === "controls"
+              ? props.theme.palette.text
+              : props.theme.palette.muted
+          }
+          disabled={!props.gitStatus}
+          onPress={() => {
+            props.onFocusControls();
+            props.onToggleDiff();
+          }}
+          theme={props.theme}
+        />
+      </box>
     </box>
   );
 }
@@ -1029,29 +1380,115 @@ function MainHeader(props: {
 function ConversationArea(props: {
   timeline: ReturnType<ReturnType<typeof createConversationDisplayCache>["buildTimeline"]>;
   connected: boolean;
+  banners: readonly TuiErrorBanner[];
+  showStartupCard: boolean;
+  focused: boolean;
   theme: TuiTheme;
 }) {
+  const statusCards = landingStatusCards({
+    connected: props.connected,
+    banners: props.banners,
+    showStartupCard: props.showStartupCard,
+  });
   return (
-    <scrollbox flexGrow={1} paddingRight={1}>
-      {props.timeline.length === 0 ? (
-        <text fg={props.theme.palette.muted}>
-          {props.connected ? "No messages yet." : "Waiting for shell snapshot."}
-        </text>
-      ) : (
-        props.timeline.slice(-18).map((entry) =>
-          entry.kind === "message" ? (
-            <box key={entry.key} flexDirection="column" marginBottom={1}>
-              <text fg={props.theme.palette.muted}>{entry.role}</text>
-              <SafeMarkdown fg={props.theme.palette.text} content={entry.markdown} />
+    <scrollbox flexGrow={1} flexShrink={1} minHeight={0} paddingRight={1} focused={props.focused}>
+      {props.timeline.length === 0
+        ? statusCards.map((card) => (
+            <box
+              key={`${card.title}:${card.detail}`}
+              backgroundColor={props.theme.palette.surface}
+              paddingLeft={2}
+              paddingRight={2}
+              paddingTop={2}
+              paddingBottom={2}
+              marginBottom={1}
+              flexDirection="column"
+              maxWidth="88%"
+            >
+              <text
+                fg={card.kind === "danger" ? props.theme.palette.danger : props.theme.palette.muted}
+              >
+                {card.title}
+              </text>
+              {card.detail ? <text fg={props.theme.palette.subtle}>{card.detail}</text> : null}
             </box>
-          ) : (
-            <text key={entry.key} fg={props.theme.palette.muted}>
-              {entry.text}
-            </text>
-          ),
-        )
-      )}
+          ))
+        : null}
+      {props.timeline.length > 0
+        ? props.timeline.slice(-18).map((entry) =>
+            entry.kind === "message" ? (
+              entry.role === "user" ? (
+                <box
+                  key={entry.key}
+                  width="100%"
+                  marginBottom={1}
+                  flexDirection="column"
+                  alignItems="flex-end"
+                >
+                  <box width="70%" flexDirection="column" alignItems="flex-end">
+                    <SafeMarkdown fg={props.theme.palette.text} content={entry.markdown} />
+                  </box>
+                  <text fg={props.theme.palette.subtle}>
+                    {formatMessageTimestamp(entry.createdAt)}
+                  </text>
+                </box>
+              ) : entry.role === "plan" ? (
+                <box
+                  key={entry.key}
+                  backgroundColor={props.theme.palette.surfacePlan}
+                  marginBottom={1}
+                  paddingLeft={1}
+                  paddingRight={1}
+                  paddingTop={1}
+                  paddingBottom={1}
+                  flexDirection="column"
+                >
+                  <text
+                    fg={props.theme.palette.success}
+                  >{`plan · ${relativeTime(entry.createdAt)}`}</text>
+                  <SafeMarkdown fg={props.theme.palette.text} content={entry.markdown} />
+                </box>
+              ) : (
+                <box key={entry.key} width="100%" marginBottom={1} flexDirection="column">
+                  <SafeMarkdown fg={props.theme.palette.text} content={entry.markdown} />
+                  <text fg={props.theme.palette.subtle}>
+                    {formatMessageTimestamp(entry.createdAt)}
+                  </text>
+                </box>
+              )
+            ) : (
+              <ActivityRow key={entry.key} entry={entry} theme={props.theme} />
+            ),
+          )
+        : null}
     </scrollbox>
+  );
+}
+
+function ActivityRow(props: {
+  entry: Extract<
+    ReturnType<ReturnType<typeof createConversationDisplayCache>["buildTimeline"]>[number],
+    { kind: "activity" }
+  >;
+  theme: TuiTheme;
+}) {
+  const display = activityDisplay(props.entry, props.theme);
+  return (
+    <box
+      backgroundColor={display.backgroundColor}
+      marginBottom={1}
+      paddingLeft={1}
+      paddingRight={1}
+      height={1}
+      flexDirection="row"
+      alignItems="center"
+      maxWidth="88%"
+    >
+      <text fg={display.color}>{`${display.icon} `}</text>
+      <box flexGrow={1} overflow="hidden" height={1}>
+        <text fg={props.theme.palette.muted}>{display.text}</text>
+      </box>
+    </box>
   );
 }
 
@@ -1064,29 +1501,72 @@ function ComposerPanel(props: {
   interactionMode: ProviderInteractionMode;
   attachmentCount: number;
   branch: string | null;
+  showWorkspaceFooter: boolean;
+  hasActiveThread: boolean;
+  hasDraftThread: boolean;
   activePendingApproval: ReturnType<typeof derivePendingApprovals>[number] | null;
   activePendingUserInput: ReturnType<typeof derivePendingUserInputs>[number] | null;
   activeQuestionIndex: number;
   customInputAnswers: Readonly<Record<string, string>>;
   selectedInputOptions: Readonly<Record<string, readonly number[]>>;
   isRunning: boolean;
+  layout: ReturnType<typeof resolveX1ShellLandingLayout>;
+  viewportColumns: number;
+  onCycleModel: () => void;
+  onCycleRuntime: () => void;
+  onCycleInteraction: () => void;
+  onPrimaryAction: () => void;
+  onStop: () => void;
+  focused: boolean;
+  controlsFocused: boolean;
+  onFocusComposer: () => void;
+  onFocusControls: () => void;
   theme: TuiTheme;
 }) {
+  const hasPending = Boolean(props.activePendingApproval || props.activePendingUserInput);
+  const placeholder = composerPlaceholder({
+    hasActiveThread: props.hasActiveThread,
+    hasDraftThread: props.hasDraftThread,
+    composerText: props.composerText,
+    activePendingApproval: props.activePendingApproval,
+    activePendingUserInput: props.activePendingUserInput,
+  });
+  const textareaHeight = hasPending
+    ? COMPOSER_PENDING_TEXTAREA_MIN_HEIGHT
+    : estimateComposerTextareaHeight({
+        text: props.composerText,
+        placeholder,
+        totalColumns: props.viewportColumns,
+        sidebarWidth: props.layout.sidebarWidth,
+        showSidebar: props.layout.showSidebar,
+      });
+  const providerId = props.modelSelection?.provider ?? props.provider?.provider ?? "codex";
+  const modelLabel = modelControlLabel(props.modelSelection);
+  const traitsLabel = composerTraitsLabel(props.modelSelection, props.runtimeMode);
   return (
     <box
-      height={props.activePendingApproval || props.activePendingUserInput ? 12 : 8}
+      height={textareaHeight + (hasPending ? 7 : 6)}
       paddingLeft={2}
       paddingRight={2}
       paddingBottom={1}
     >
       <box
+        position="relative"
         flexGrow={1}
         border
-        borderColor={props.theme.palette.border}
+        borderStyle="rounded"
+        borderColor={
+          props.focused || props.controlsFocused
+            ? props.theme.palette.composerBorder
+            : props.theme.palette.composerBorderMuted
+        }
         backgroundColor={props.theme.palette.composerPanel}
+        paddingTop={hasPending ? 0 : 1}
+        paddingBottom={1}
         paddingLeft={1}
         paddingRight={1}
         flexDirection="column"
+        onMouseDown={props.onFocusComposer}
       >
         {props.activePendingApproval ? (
           <PendingApprovalPanel approval={props.activePendingApproval} theme={props.theme} />
@@ -1099,35 +1579,157 @@ function ComposerPanel(props: {
             theme={props.theme}
           />
         ) : (
-          <textarea
-            key={props.composerText}
-            focused
-            initialValue={props.composerText}
-            placeholder="Ask anything or @tag files/folders"
-          />
+          <box
+            marginBottom={1}
+            height={textareaHeight}
+            minHeight={textareaHeight}
+            paddingLeft={1}
+            paddingRight={1}
+          >
+            <textarea
+              key={props.composerText}
+              focused={props.focused}
+              initialValue={props.composerText}
+              placeholder={placeholder}
+              cursorColor={props.theme.palette.cursor}
+              style={{
+                backgroundColor: props.theme.palette.composerPanel,
+                focusedBackgroundColor: props.theme.palette.composerPanel,
+                textColor: props.theme.palette.text,
+                focusedTextColor: props.theme.palette.text,
+                placeholderColor: props.theme.palette.subtle,
+                height: "100%",
+                width: "100%",
+              }}
+            />
+          </box>
         )}
-        <box height={1} flexDirection="row" alignItems="center">
-          <ControlsPanel
-            provider={props.provider}
-            modelSelection={props.modelSelection}
-            runtimeMode={props.runtimeMode}
-            interactionMode={props.interactionMode}
-            attachmentCount={props.attachmentCount}
+        <box
+          paddingLeft={1}
+          paddingRight={1}
+          flexDirection="row"
+          alignItems="center"
+          onMouseDown={props.onFocusControls}
+        >
+          <box flexDirection="row" alignItems="center" flexGrow={1} overflow="hidden" height={1}>
+            <ToolbarButton
+              icon={providerIcon(providerId)}
+              iconColor={providerColor(providerId, props.theme)}
+              label={props.layout.showComposerModelLabel ? modelLabel : undefined}
+              compact={!props.layout.showComposerModelLabel}
+              onPress={props.onCycleModel}
+              active={props.controlsFocused}
+              theme={props.theme}
+            />
+            {traitsLabel ? (
+              <>
+                {props.layout.showComposerDividers ? <FooterDivider theme={props.theme} /> : null}
+                <ToolbarButton
+                  icon={composerTraitsIcon(props.modelSelection)}
+                  label={
+                    props.layout.showComposerTraitsLabel
+                      ? truncateTitleForDisplay(traitsLabel, 14)
+                      : undefined
+                  }
+                  compact={!props.layout.showComposerTraitsLabel}
+                  onPress={props.onCycleRuntime}
+                  active={props.controlsFocused}
+                  theme={props.theme}
+                />
+              </>
+            ) : null}
+            {props.layout.showComposerDividers ? <FooterDivider theme={props.theme} /> : null}
+            <ToolbarButton
+              icon={interactionIcon(props.interactionMode)}
+              label={
+                props.layout.showComposerModeLabels
+                  ? interactionLabel(props.interactionMode)
+                  : undefined
+              }
+              compact={!props.layout.showComposerModeLabels}
+              active={props.interactionMode === "plan"}
+              onPress={props.onCycleInteraction}
+              theme={props.theme}
+            />
+            {props.layout.showComposerDividers ? <FooterDivider theme={props.theme} /> : null}
+            <ToolbarButton
+              icon={runtimeFooterIcon(props.runtimeMode)}
+              label={
+                props.layout.showComposerModeLabels
+                  ? runtimeFooterLabel(props.runtimeMode)
+                  : undefined
+              }
+              compact={!props.layout.showComposerModeLabels}
+              active={props.runtimeMode === "approval-required"}
+              onPress={props.onCycleRuntime}
+              theme={props.theme}
+            />
+            {props.attachmentCount > 0 ? (
+              <>
+                {props.layout.showComposerDividers ? <FooterDivider theme={props.theme} /> : null}
+                <ToolbarButton
+                  icon="󰋩"
+                  label={`${props.attachmentCount}`}
+                  compact
+                  onPress={() => undefined}
+                  theme={props.theme}
+                />
+              </>
+            ) : null}
+          </box>
+          <ComposerSendButton
+            icon={props.isRunning ? "■" : "↑"}
+            variant={props.isRunning ? "stop" : "send"}
+            disabled={!props.isRunning && props.composerText.trim().length === 0}
+            onPress={props.isRunning ? props.onStop : props.onPrimaryAction}
             theme={props.theme}
           />
-          <box flexGrow={1} />
-          <text fg={props.isRunning ? props.theme.palette.danger : props.theme.palette.muted}>
-            {props.isRunning ? "■" : "↑"}
-          </text>
         </box>
         {props.submitError ? (
           <text fg={props.theme.palette.danger}>{props.submitError}</text>
         ) : null}
-        <box height={1} flexDirection="row" alignItems="center">
-          <text fg={props.theme.palette.muted}>▰ Local</text>
-          <box flexGrow={1} />
-          <text fg={props.theme.palette.muted}>{`⑂ ${displayText(props.branch ?? "main")}`}</text>
-        </box>
+        {props.showWorkspaceFooter ? (
+          <box
+            position="absolute"
+            left={1}
+            right={1}
+            bottom={-1}
+            zIndex={30}
+            flexDirection="row"
+            alignItems="center"
+            justifyContent="space-between"
+            backgroundColor="transparent"
+          >
+            <box
+              backgroundColor={props.theme.palette.composerPanel}
+              paddingLeft={1}
+              paddingRight={1}
+            >
+              <ToolbarButton
+                icon="󰉋"
+                label="Local"
+                compact
+                chrome="bare"
+                onPress={() => undefined}
+                theme={props.theme}
+              />
+            </box>
+            <box
+              backgroundColor={props.theme.palette.composerPanel}
+              paddingLeft={1}
+              paddingRight={1}
+            >
+              <ToolbarButton
+                icon="󰘬"
+                label={truncateTitleForDisplay(displayText(props.branch ?? "Select branch"), 20)}
+                compact
+                chrome="bare"
+                onPress={() => undefined}
+                theme={props.theme}
+              />
+            </box>
+          </box>
+        ) : null}
       </box>
     </box>
   );
@@ -1135,10 +1737,10 @@ function ComposerPanel(props: {
 
 function WindowDots(props: { theme: TuiTheme }) {
   return (
-    <box width={6} flexDirection="row">
-      <text fg={props.theme.palette.danger}>●</text>
-      <text fg={props.theme.palette.warning}> ●</text>
-      <text fg={props.theme.palette.success}> ● </text>
+    <box flexDirection="row" alignItems="center" marginRight={2}>
+      <text fg={props.theme.palette.macRed}>● </text>
+      <text fg={props.theme.palette.macYellow}>● </text>
+      <text fg={props.theme.palette.macGreen}>● </text>
     </box>
   );
 }
@@ -1149,9 +1751,234 @@ function Badge(props: { label: string; theme: TuiTheme }) {
       marginLeft={1}
       paddingLeft={1}
       paddingRight={1}
-      backgroundColor={props.theme.palette.panelMuted}
+      height={1}
+      justifyContent="center"
+      backgroundColor={props.theme.palette.controlHover}
     >
       <text fg={props.theme.palette.muted}>{props.label}</text>
+    </box>
+  );
+}
+
+function ActionPill(props: { label: string; shortcut: string; active?: boolean; theme: TuiTheme }) {
+  return (
+    <box
+      marginRight={1}
+      paddingLeft={1}
+      paddingRight={1}
+      height={1}
+      backgroundColor={
+        props.active ? props.theme.palette.controlActive : props.theme.palette.controlHover
+      }
+    >
+      <text fg={props.active ? props.theme.palette.text : props.theme.palette.muted}>
+        {`${props.label} ${props.shortcut}`}
+      </text>
+    </box>
+  );
+}
+
+function SectionLabel(props: {
+  label: string;
+  actions?: ReadonlyArray<{
+    icon: string;
+    active?: boolean;
+    disabled?: boolean;
+    onPress?: () => void;
+  }>;
+  theme: TuiTheme;
+}) {
+  return (
+    <box flexDirection="row" alignItems="center" paddingLeft={1} paddingRight={1} marginBottom={1}>
+      <text fg={props.theme.palette.subtle}>{props.label}</text>
+      <box flexGrow={1} />
+      <box flexDirection="row">
+        {(props.actions ?? []).map((action) => (
+          <IconButton
+            key={`${props.label}:${action.icon}`}
+            icon={action.icon}
+            active={action.active ?? false}
+            disabled={action.disabled ?? false}
+            {...(action.onPress ? { onPress: action.onPress } : {})}
+            theme={props.theme}
+          />
+        ))}
+      </box>
+    </box>
+  );
+}
+
+function IconButton(props: {
+  icon: string;
+  active?: boolean;
+  disabled?: boolean;
+  width?: number;
+  onPress?: () => void;
+  theme: TuiTheme;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const active = !props.disabled && (props.active || hovered);
+  return (
+    <box
+      width={props.width ?? 3}
+      minWidth={props.width ?? 3}
+      maxWidth={props.width ?? 3}
+      height={1}
+      justifyContent="center"
+      alignItems="center"
+      backgroundColor={
+        props.disabled
+          ? "transparent"
+          : active
+            ? props.theme.palette.controlActive
+            : props.theme.palette.control
+      }
+      onMouseOver={() => setHovered(true)}
+      onMouseOut={() => setHovered(false)}
+      {...(props.onPress && !props.disabled ? { onMouseDown: props.onPress } : {})}
+    >
+      <text
+        fg={
+          props.disabled
+            ? props.theme.palette.subtle
+            : active
+              ? props.theme.palette.text
+              : props.theme.palette.muted
+        }
+      >
+        {props.icon}
+      </text>
+    </box>
+  );
+}
+
+function SidebarRow(props: {
+  active?: boolean;
+  suppressHighlight?: boolean;
+  activeBackgroundColor?: string;
+  onPress?: () => void;
+  children: React.ReactNode;
+  theme: TuiTheme;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const active = props.active || hovered;
+  return (
+    <box
+      height={1}
+      paddingLeft={1}
+      paddingRight={1}
+      flexDirection="row"
+      alignItems="center"
+      overflow="hidden"
+      backgroundColor={
+        props.suppressHighlight
+          ? "transparent"
+          : active
+            ? (props.activeBackgroundColor ?? props.theme.palette.controlActive)
+            : "transparent"
+      }
+      onMouseOver={() => setHovered(true)}
+      onMouseOut={() => setHovered(false)}
+      {...(props.onPress ? { onMouseDown: props.onPress } : {})}
+    >
+      {props.children}
+    </box>
+  );
+}
+
+function ToolbarButton(props: {
+  icon?: string;
+  label?: string | undefined;
+  active?: boolean;
+  disabled?: boolean;
+  iconColor?: string;
+  marginRight?: number;
+  compact?: boolean;
+  chrome?: "default" | "bare";
+  width?: number;
+  justifyContent?: "center" | "flex-start" | "flex-end";
+  onPress: () => void;
+  theme: TuiTheme;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const isBare = props.chrome === "bare";
+  const active = !props.disabled && (props.active || hovered);
+  const foreground = props.disabled
+    ? props.theme.palette.subtle
+    : active
+      ? props.theme.palette.text
+      : props.theme.palette.muted;
+  return (
+    <box
+      backgroundColor={
+        isBare
+          ? "transparent"
+          : active
+            ? props.theme.palette.controlActive
+            : props.theme.palette.control
+      }
+      paddingLeft={isBare ? 1 : props.label ? 1 : 0}
+      paddingRight={isBare ? 1 : props.label ? 1 : 0}
+      marginRight={isBare ? 0 : (props.marginRight ?? 1)}
+      height={1}
+      width={props.label ? "auto" : (props.width ?? (props.compact ? 3 : 4))}
+      flexDirection="row"
+      alignItems="center"
+      justifyContent={props.justifyContent ?? "center"}
+      flexShrink={0}
+      onMouseOver={() => setHovered(true)}
+      onMouseOut={() => setHovered(false)}
+      onMouseDown={() => {
+        if (!props.disabled) props.onPress();
+      }}
+    >
+      {props.icon ? (
+        <text fg={props.iconColor ?? foreground}>
+          {props.label ? `${props.icon} ` : props.icon}
+        </text>
+      ) : null}
+      {props.label ? <text fg={foreground}>{props.label}</text> : null}
+    </box>
+  );
+}
+
+function FooterDivider(props: { theme: TuiTheme }) {
+  return <text fg={props.theme.palette.border}>│ </text>;
+}
+
+function ComposerSendButton(props: {
+  icon: string;
+  variant: "send" | "stop";
+  disabled?: boolean;
+  onPress: () => void;
+  theme: TuiTheme;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const isStop = props.variant === "stop";
+  return (
+    <box
+      width={3}
+      height={1}
+      backgroundColor={
+        props.disabled
+          ? props.theme.palette.controlActive
+          : isStop
+            ? props.theme.palette.composerStop
+            : hovered
+              ? props.theme.palette.composerSendHover
+              : props.theme.palette.composerSend
+      }
+      justifyContent="center"
+      alignItems="center"
+      onMouseDown={() => {
+        if (!props.disabled) props.onPress();
+      }}
+      onMouseOver={() => setHovered(true)}
+      onMouseOut={() => setHovered(false)}
+    >
+      <text fg={props.disabled ? props.theme.palette.subtle : props.theme.palette.text}>
+        {props.icon}
+      </text>
     </box>
   );
 }
@@ -1167,6 +1994,253 @@ function relativeTime(value: string | null | undefined): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h`;
   return `${Math.floor(hours / 24)}d`;
+}
+
+function formatMessageTimestamp(value: string | null | undefined): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function truncateTitleForDisplay(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  if (maxLength <= 1) return value.slice(0, maxLength);
+  return `${value.slice(0, maxLength - 1)}…`;
+}
+
+function headerTitleMaxLength(input: {
+  viewportColumns: number;
+  showSidebarToggle: boolean;
+  showHeaderProjectBadge: boolean;
+}): number {
+  return Math.max(
+    12,
+    Math.min(
+      HEADER_THREAD_TITLE_MAX_LENGTH,
+      input.viewportColumns -
+        (input.showSidebarToggle ? 6 : 0) -
+        (input.showHeaderProjectBadge ? 20 : 4),
+    ),
+  );
+}
+
+function landingStatusCards(input: {
+  connected: boolean;
+  banners: readonly TuiErrorBanner[];
+  showStartupCard: boolean;
+}): readonly TuiErrorBanner[] {
+  const startupCard: TuiErrorBanner = {
+    kind: "info",
+    title: "booting workspace",
+    detail: "",
+  };
+  const cards = input.banners.filter((banner) => {
+    if (banner.title === "Attach auth required") return false;
+    if (banner.title === "Not connected") return false;
+    return true;
+  });
+  return input.showStartupCard ? [startupCard, ...cards] : cards;
+}
+
+function nextFocusArea(current: LandingFocusArea, sidebarVisible: boolean): LandingFocusArea {
+  const order: LandingFocusArea[] = sidebarVisible
+    ? ["projects", "threads", "timeline", "composer", "controls"]
+    : ["timeline", "composer", "controls"];
+  const index = order.indexOf(current);
+  return order[(index + 1 + order.length) % order.length] ?? "composer";
+}
+
+function sortedProjects(
+  projects: readonly OrchestrationProjectShell[],
+): readonly OrchestrationProjectShell[] {
+  return projects.toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function sortedVisibleThreads(shell: TuiShellState): readonly OrchestrationThreadShell[] {
+  return shell.threads
+    .filter((thread) => !thread.archivedAt)
+    .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function overlaySidebarLayout(layout: ReturnType<typeof resolveX1ShellLandingLayout>) {
+  return {
+    ...layout,
+    sidebarCollapsed: false,
+    sidebarWidth: 34,
+    showSidebar: true,
+    showWindowDots: true,
+    showSidebarAlphaBadge: true,
+    sidebarTitle: "X1Shell",
+  };
+}
+
+function activityDisplay(
+  entry: Extract<
+    ReturnType<ReturnType<typeof createConversationDisplayCache>["buildTimeline"]>[number],
+    { kind: "activity" }
+  >,
+  theme: TuiTheme,
+) {
+  const text = entry.summary || entry.text;
+  if (entry.tone === "error") {
+    return {
+      icon: "×",
+      color: theme.palette.danger,
+      backgroundColor: theme.palette.surfaceWarn,
+      text,
+    };
+  }
+  if (entry.tone === "approval") {
+    return {
+      icon: "?",
+      color: theme.palette.warning,
+      backgroundColor: theme.palette.surfaceWarn,
+      text,
+    };
+  }
+  if (entry.tone === "tool") {
+    return { icon: "›", color: theme.palette.info, backgroundColor: theme.palette.surface, text };
+  }
+  if (/plan/i.test(entry.activityKind)) {
+    return {
+      icon: "◆",
+      color: theme.palette.success,
+      backgroundColor: theme.palette.surfacePlan,
+      text,
+    };
+  }
+  return { icon: "•", color: theme.palette.subtle, backgroundColor: theme.palette.surface, text };
+}
+
+function resolveProjectStatus(threads: readonly OrchestrationThreadShell[]) {
+  for (const label of ["approval", "input", "working", "plan", "completed"] as const) {
+    const status = threads.map(resolveThreadStatus).find((entry) => entry?.rank === label);
+    if (status) return status;
+  }
+  return null;
+}
+
+function resolveThreadStatus(thread: OrchestrationThreadShell) {
+  if (thread.hasPendingApprovals) {
+    return { rank: "approval" as const, color: "#f59e0b" };
+  }
+  if (thread.hasPendingUserInput) {
+    return { rank: "input" as const, color: "#818cf8" };
+  }
+  if (thread.session?.status === "running" || thread.session?.status === "starting") {
+    return { rank: "working" as const, color: "#7dd3fc" };
+  }
+  if (thread.hasActionableProposedPlan) {
+    return { rank: "plan" as const, color: "#a78bfa" };
+  }
+  if (thread.latestTurn?.state === "completed") {
+    return { rank: "completed" as const, color: "#10b981" };
+  }
+  return null;
+}
+
+function estimateComposerTextareaHeight(input: {
+  text: string;
+  placeholder: string;
+  totalColumns: number;
+  sidebarWidth: number;
+  showSidebar: boolean;
+}): number {
+  const mainColumns = input.totalColumns - input.sidebarWidth - (input.showSidebar ? 1 : 0);
+  const composerInnerWidth = Math.max(24, mainColumns - 12);
+  const content = input.text.length > 0 ? input.text : input.placeholder;
+  const lines = content.split("\n").reduce((count, line) => {
+    return count + Math.max(1, Math.ceil(Math.max(line.length, 1) / composerInnerWidth));
+  }, 0);
+  return Math.max(COMPOSER_TEXTAREA_MIN_HEIGHT, Math.min(COMPOSER_TEXTAREA_MAX_HEIGHT, lines));
+}
+
+function composerPlaceholder(input: {
+  hasActiveThread: boolean;
+  hasDraftThread: boolean;
+  composerText: string;
+  activePendingApproval: ReturnType<typeof derivePendingApprovals>[number] | null;
+  activePendingUserInput: ReturnType<typeof derivePendingUserInputs>[number] | null;
+}): string {
+  if (input.activePendingApproval) {
+    return input.activePendingApproval.detail
+      ? "Resolve this approval request to continue"
+      : "Resolve this approval request to continue";
+  }
+  if (input.activePendingUserInput) {
+    return "Type your own answer, or leave this blank to use the selected option";
+  }
+  if (!input.hasActiveThread && input.composerText.length === 0) {
+    return input.hasDraftThread
+      ? "Start a new thread with a prompt"
+      : "Ask for follow-up changes or attach images";
+  }
+  return "Ask anything or @tag files/folders";
+}
+
+function providerIcon(provider: string | null | undefined): string {
+  return provider === "claudeAgent" ? "✱" : "󰚩";
+}
+
+function providerColor(provider: string | null | undefined, theme: TuiTheme): string {
+  return provider === "claudeAgent" ? theme.palette.claude : theme.palette.muted;
+}
+
+function modelControlLabel(modelSelection: ModelSelection | null): string {
+  if (!modelSelection) return "No model";
+  const model = displayText(modelSelection.model);
+  if (modelSelection.provider === "codex") {
+    return model.replace(/^gpt-/i, "GPT-").replace(/-codex$/i, "");
+  }
+  return model
+    .replace(/^claude-/i, "")
+    .replace(/-/g, " ")
+    .replace(/\b(\d)\s+(\d)\b/g, "$1.$2");
+}
+
+function composerTraitsLabel(
+  modelSelection: ModelSelection | null,
+  runtimeMode: RuntimeMode,
+): string | null {
+  if (modelSelection?.provider === "claudeAgent") return "Thinking";
+  if (runtimeMode === "full-access") return "High";
+  if (runtimeMode === "auto-accept-edits") return "Medium";
+  return "Low";
+}
+
+function composerTraitsIcon(modelSelection: ModelSelection | null): string {
+  return modelSelection?.provider === "claudeAgent" ? "󰚩" : "󰔟";
+}
+
+function interactionLabel(mode: ProviderInteractionMode): string {
+  return mode === "plan" ? "Plan" : "Chat";
+}
+
+function interactionIcon(mode: ProviderInteractionMode): string {
+  return mode === "plan" ? "󰨖" : "󰍩";
+}
+
+function runtimeFooterLabel(mode: RuntimeMode): string {
+  switch (mode) {
+    case "full-access":
+      return "Full access";
+    case "auto-accept-edits":
+      return "Auto edits";
+    case "approval-required":
+      return "Approval";
+  }
+}
+
+function runtimeFooterIcon(mode: RuntimeMode): string {
+  switch (mode) {
+    case "full-access":
+      return "󰌾";
+    case "auto-accept-edits":
+      return "󰄬";
+    case "approval-required":
+      return "󰌍";
+  }
 }
 
 function findProvider(

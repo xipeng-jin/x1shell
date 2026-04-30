@@ -49,8 +49,12 @@ describe("App headless smoke", () => {
     expect(frame).toContain("X1Shell");
     expect(frame).toContain("ALPHA");
     expect(frame).toContain("PROJECTS");
-    expect(frame).toContain("Ask anything or @tag files/folders");
-    expect(frame).toContain("Waiting for shell snapshot.");
+    expect(frame).toContain("Ask for follow-up changes or attach images");
+    expect(frame).toContain("GPT-5.4");
+    expect(frame).toContain("booting workspace");
+    expect(frame).not.toContain("Attach auth required");
+    expect(frame).not.toContain("No model");
+    expect(frame).not.toContain("Local");
     expect(frame).not.toContain("secret");
     expect(frame).not.toContain("shell seq");
     expect(frame).not.toContain("X1SHELL_TOKEN");
@@ -91,11 +95,11 @@ describe("App headless smoke", () => {
     expect(frame).toContain("PROJECTS");
     expect(frame).toContain("Thread Shell Fresh");
     expect(frame).not.toContain("Thread Detail Stale");
-    expect(frame).toContain("assistant");
     expect(frame).toContain("hello link");
     expect(frame).toContain("Plan with");
     expect(frame).toContain("draft");
     expect(frame).toContain("Local");
+    expect(frame).toContain("Full access");
     expect(frame).not.toContain("Threads");
     expect(frame).not.toContain("shell seq");
     expect(frame).not.toContain("Message agent");

@@ -314,6 +314,18 @@ async function runInteractive(
         orchestrationStore={orchestrationStore}
         threadDetailStore={threadDetailStore}
         debugBuffer={debugBuffer}
+        onSelectProject={(projectId) => {
+          orchestrationStore.selectProject(projectId);
+          controller?.setActiveThread(null);
+        }}
+        onSelectThread={(threadId) => {
+          orchestrationStore.selectThread(threadId);
+          controller?.setActiveThread(threadId);
+        }}
+        onCreateProjectDraft={(projectId) => {
+          orchestrationStore.createProjectDraft(projectId);
+          controller?.setActiveThread(null);
+        }}
         onSelectNextThread={(direction) => {
           orchestrationStore.selectNextThread(direction);
           controller?.setActiveThread(orchestrationStore.getSnapshot().selectedThreadId);

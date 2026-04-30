@@ -4,7 +4,7 @@ const SIDEBAR_TOGGLE_MAX_MAIN_COLUMNS = 56;
 const SIDEBAR_FORCE_COLLAPSE_MAX_MAIN_COLUMNS = 44;
 const COMPOSER_MODE_LABEL_MIN_MAIN_COLUMNS = 44;
 const COMPOSER_MODEL_LABEL_MIN_MAIN_COLUMNS = 62;
-const COMPOSER_RUNTIME_LABEL_MIN_MAIN_COLUMNS = 72;
+const COMPOSER_TRAITS_LABEL_MIN_MAIN_COLUMNS = 72;
 
 export type X1ShellLandingLayout = Readonly<{
   showSidebarToggle: boolean;
@@ -18,7 +18,7 @@ export type X1ShellLandingLayout = Readonly<{
   showHeaderProjectBadge: boolean;
   showComposerModeLabels: boolean;
   showComposerModelLabel: boolean;
-  showComposerRuntimeLabel: boolean;
+  showComposerTraitsLabel: boolean;
   showComposerDividers: boolean;
 }>;
 
@@ -40,22 +40,23 @@ export function resolveX1ShellLandingLayout(input: {
     (sidebarCollapsed ? 0 : 1);
   const showComposerModeLabels = mainPanelColumns >= COMPOSER_MODE_LABEL_MIN_MAIN_COLUMNS;
   const showComposerModelLabel = mainPanelColumns >= COMPOSER_MODEL_LABEL_MIN_MAIN_COLUMNS;
-  const showComposerRuntimeLabel = mainPanelColumns >= COMPOSER_RUNTIME_LABEL_MIN_MAIN_COLUMNS;
+  const showComposerTraitsLabel = mainPanelColumns >= COMPOSER_TRAITS_LABEL_MIN_MAIN_COLUMNS;
+  const showSidebar = !sidebarCollapsed;
 
   return {
     showSidebarToggle,
     sidebarForcedCollapsed,
     sidebarCollapsed,
     sidebarWidth: sidebarCollapsed ? 0 : X1SHELL_SIDEBAR_WIDTH,
-    showSidebar: !sidebarCollapsed,
-    showWindowDots: !sidebarCollapsed,
-    showSidebarAlphaBadge: !sidebarCollapsed,
-    sidebarTitle: sidebarCollapsed ? "X1" : "X1Shell",
+    showSidebar,
+    showWindowDots: showSidebar,
+    showSidebarAlphaBadge: showSidebar,
+    sidebarTitle: showSidebar ? "X1Shell" : "X1",
     showHeaderProjectBadge: input.viewportColumns >= 144,
     showComposerModeLabels,
     showComposerModelLabel,
-    showComposerRuntimeLabel,
+    showComposerTraitsLabel,
     showComposerDividers:
-      showComposerModeLabels || showComposerModelLabel || showComposerRuntimeLabel,
+      showComposerModeLabels || showComposerModelLabel || showComposerTraitsLabel,
   };
 }

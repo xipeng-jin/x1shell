@@ -21,7 +21,7 @@ describe("resolveX1ShellLandingLayout", () => {
         showHeaderProjectBadge: true,
         showComposerModeLabels: true,
         showComposerModelLabel: true,
-        showComposerRuntimeLabel: true,
+        showComposerTraitsLabel: true,
         showComposerDividers: true,
       }),
     );

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import type { ProjectId, ThreadId } from "@t3tools/contracts";
 import { App } from "./App.js";
 import type { TuiPaths } from "../cli/config.js";
 import type { createDebugBuffer } from "../domain/debug.js";
@@ -15,6 +16,9 @@ export function TuiRuntimeApp(props: {
   orchestrationStore: ReturnType<typeof createOrchestrationStore>;
   threadDetailStore: ReturnType<typeof createThreadDetailStore>;
   debugBuffer: ReturnType<typeof createDebugBuffer>;
+  onSelectProject?: (projectId: ProjectId) => void;
+  onSelectThread?: (threadId: ThreadId) => void;
+  onCreateProjectDraft?: (projectId: ProjectId) => void;
   onSelectNextThread?: (direction: 1 | -1) => void;
   onNewThread?: () => void;
   onSubmitCommand?: Parameters<typeof App>[0]["onSubmitCommand"];
@@ -55,6 +59,9 @@ export function TuiRuntimeApp(props: {
       shellState={shellState}
       threadDetailState={threadDetailState}
       debugEntries={debugEntries}
+      onSelectProject={(projectId) => props.onSelectProject?.(projectId)}
+      onSelectThread={(threadId) => props.onSelectThread?.(threadId)}
+      onCreateProjectDraft={(projectId) => props.onCreateProjectDraft?.(projectId)}
       {...(props.onSelectNextThread ? { onSelectNextThread: props.onSelectNextThread } : {})}
       {...(props.onNewThread ? { onNewThread: props.onNewThread } : {})}
       onDraftChange={(projectId, draft) => props.orchestrationStore.setDraft(projectId, draft)}

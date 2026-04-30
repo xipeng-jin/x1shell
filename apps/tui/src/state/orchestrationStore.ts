@@ -82,6 +82,11 @@ export function createOrchestrationStore(initial?: Partial<TuiShellState>) {
       if (!thread) return;
       setState({ ...state, selectedProjectId: thread.projectId, selectedThreadId: thread.id });
     },
+    selectProject: (projectId: ProjectId) => {
+      const project = state.projects.find((entry) => entry.id === projectId);
+      if (!project) return;
+      setState({ ...state, selectedProjectId: project.id, selectedThreadId: null });
+    },
     selectNextThread: (direction: 1 | -1) => {
       const visible = visibleThreads(state);
       if (visible.length === 0) return;

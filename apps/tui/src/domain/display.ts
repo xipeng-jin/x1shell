@@ -73,6 +73,9 @@ export type DisplayTimelineEntry =
       readonly kind: "activity";
       readonly key: string;
       readonly createdAt: string;
+      readonly activityKind: string;
+      readonly tone: OrchestrationThreadActivity["tone"];
+      readonly summary: string;
       readonly text: string;
     };
 
@@ -133,6 +136,9 @@ export function createConversationDisplayCache(input: { readonly windowSize?: nu
           kind: "activity" as const,
           key: `activity:${activity.id}`,
           createdAt: activity.createdAt,
+          tone: activity.tone,
+          rawKind: activity.kind,
+          rawSummary: activity.summary,
           raw: `${activity.kind}: ${activity.summary}`,
         })),
         ...thread.proposedPlans.map((plan) => ({
@@ -167,6 +173,9 @@ export function createConversationDisplayCache(input: { readonly windowSize?: nu
               kind: "activity",
               key: entry.key,
               createdAt: entry.createdAt,
+              activityKind: textFor(`${entry.key}:kind`, entry.rawKind),
+              tone: entry.tone,
+              summary: textFor(`${entry.key}:summary`, entry.rawSummary),
               text: textFor(entry.key, entry.raw),
             },
       );
