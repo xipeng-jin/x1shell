@@ -36,7 +36,7 @@ describe("TUI orchestration command builders", () => {
         text: "hello",
         attachments: [],
       },
-      modelSelection: { provider: "codex", model: "gpt-5" },
+      modelSelection: { instanceId: "codex", model: "gpt-5" },
       runtimeMode: "full-access",
       interactionMode: "default",
     });
@@ -68,7 +68,7 @@ describe("TUI orchestration command builders", () => {
         createThread: {
           projectId: "project-a",
           title: "create it",
-          modelSelection: { provider: "codex" },
+          modelSelection: { instanceId: "codex" },
           runtimeMode: "full-access",
           interactionMode: "default",
           branch: null,
@@ -87,7 +87,7 @@ describe("TUI orchestration command builders", () => {
       now: "2026-04-28T12:00:00.000Z",
       text: "explain image",
       thread: threadShell("thread-a"),
-      modelSelection: { provider: "codex", model: "gpt-5.1" } as never,
+      modelSelection: { instanceId: "codex", model: "gpt-5.1" } as never,
       runtimeMode: "approval-required",
       interactionMode: "plan",
       attachments: [
@@ -102,7 +102,7 @@ describe("TUI orchestration command builders", () => {
     });
 
     expect(command).toMatchObject({
-      modelSelection: { provider: "codex", model: "gpt-5.1" },
+      modelSelection: { instanceId: "codex", model: "gpt-5.1" },
       runtimeMode: "approval-required",
       interactionMode: "plan",
       message: { attachments: [{ mimeType: "image/png", sizeBytes: 3 }] },
@@ -118,7 +118,7 @@ describe("TUI orchestration command builders", () => {
     expect(
       buildThreadMetaUpdate({
         threadId: "thread-a" as never,
-        modelSelection: { provider: "codex", model: "gpt-5.1" } as never,
+        modelSelection: { instanceId: "codex", model: "gpt-5.1" } as never,
       }),
     ).toMatchObject({ type: "thread.meta.update", modelSelection: { model: "gpt-5.1" } });
     expect(
@@ -202,7 +202,7 @@ function threadShell(
     id,
     projectId: "project-a",
     title: "Thread",
-    modelSelection: { provider: "codex", model: "gpt-5" },
+    modelSelection: { instanceId: "codex", model: "gpt-5" },
     runtimeMode: "full-access",
     interactionMode: "default",
     branch: "main",

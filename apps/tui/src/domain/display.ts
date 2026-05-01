@@ -29,7 +29,7 @@ export function displayThread(thread: OrchestrationThreadShell | OrchestrationTh
     branch: displayText(thread.branch ?? ""),
     worktreePath: displayText(thread.worktreePath ?? ""),
     model: displayText(thread.modelSelection.model),
-    provider: displayText(thread.modelSelection.provider),
+    provider: displayText(thread.modelSelection.instanceId),
     session:
       thread.session?.lastError != null
         ? `${thread.session.status}: ${displayText(thread.session.lastError)}`

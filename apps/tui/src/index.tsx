@@ -15,6 +15,7 @@ import {
 } from "./runtime/localManaged.js";
 import { createLogger, safeOutputUnknown } from "./runtime/log.js";
 import { createDebugBuffer } from "./domain/debug.js";
+import { createDefaultTuiModelSelection } from "./domain/providerInstances.js";
 import {
   captureProcessListeners,
   removeAddedProcessListeners,
@@ -139,7 +140,7 @@ function seedHeadlessFixture(
           id: "project-a",
           title: "Project",
           workspaceRoot: "/repo/project",
-          defaultModelSelection: { provider: "codex", model: "gpt-5" },
+          defaultModelSelection: createDefaultTuiModelSelection(),
           scripts: [],
           createdAt: "2026-04-28T00:00:00.000Z",
           updatedAt: "2026-04-28T00:00:00.000Z",
@@ -150,7 +151,7 @@ function seedHeadlessFixture(
           id: "thread-a",
           projectId: "project-a",
           title: "Thread Shell Fresh",
-          modelSelection: { provider: "codex", model: "gpt-5" },
+          modelSelection: createDefaultTuiModelSelection(),
           runtimeMode: "full-access",
           interactionMode: "default",
           branch: "main",
@@ -177,7 +178,7 @@ function seedHeadlessFixture(
         id: "thread-a",
         projectId: "project-a",
         title: "Thread Detail Stale",
-        modelSelection: { provider: "codex", model: "gpt-5" },
+        modelSelection: createDefaultTuiModelSelection(),
         runtimeMode: "full-access",
         interactionMode: "default",
         branch: "main",
