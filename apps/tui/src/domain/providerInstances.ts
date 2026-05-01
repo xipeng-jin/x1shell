@@ -6,6 +6,7 @@ import {
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
+import { createModelSelection, resolveModelSlugForProvider } from "@t3tools/shared/model";
 
 export interface TuiProviderInstanceEntry {
   readonly instanceId: ProviderInstanceId;
@@ -23,11 +24,11 @@ export const DEFAULT_TUI_PROVIDER_INSTANCE_ID = defaultInstanceIdForDriver(
   DEFAULT_TUI_PROVIDER_DRIVER,
 );
 
-export function createDefaultTuiModelSelection(model = "gpt-5") {
-  return {
-    instanceId: DEFAULT_TUI_PROVIDER_INSTANCE_ID,
-    model,
-  };
+export function createDefaultTuiModelSelection(model?: string | null) {
+  return createModelSelection(
+    DEFAULT_TUI_PROVIDER_INSTANCE_ID,
+    resolveModelSlugForProvider(DEFAULT_TUI_PROVIDER_DRIVER, model),
+  );
 }
 
 export function deriveProviderInstanceEntries(
