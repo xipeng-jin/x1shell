@@ -2,7 +2,6 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   type ClientOrchestrationCommand,
@@ -55,6 +54,7 @@ import {
   displayThread,
 } from "../domain/display.js";
 import {
+  createDefaultTuiModelSelection,
   deriveProviderInstanceEntries,
   findProviderInstance,
   providerSelectable,
@@ -231,10 +231,7 @@ export function App(props: {
     ? (threadControlContextById[activeThreadHeader.id] ?? {})
     : {};
   const selectedControlContext = activeThreadHeader ? threadControlContext : projectDraftContext;
-  const defaultModelSelection: ModelSelection = {
-    provider: "codex",
-    model: DEFAULT_MODEL_BY_PROVIDER.codex,
-  };
+  const defaultModelSelection: ModelSelection = createDefaultTuiModelSelection();
   const selectedModelSelection =
     selectedControlContext.modelSelection ??
     activeThreadHeader?.modelSelection ??
@@ -1540,9 +1537,9 @@ function ComposerPanel(props: {
         sidebarWidth: props.layout.sidebarWidth,
         showSidebar: props.layout.showSidebar,
       });
-  const providerId = props.modelSelection?.provider ?? props.provider?.provider ?? "codex";
-  const modelLabel = modelControlLabel(props.modelSelection);
-  const traitsLabel = composerTraitsLabel(props.modelSelection, props.runtimeMode);
+  const providerId = props.provider?.driver ?? props.modelSelection?.instanceId ?? "codex";
+  const modelLabel = modelControlLabel(props.modelSelection, props.provider);
+  const traitsLabel = composerTraitsLabel(props.modelSelection, props.provider, props.runtimeMode);
   return (
     <box
       height={textareaHeight + (hasPending ? 7 : 6)}
@@ -1625,7 +1622,7 @@ function ComposerPanel(props: {
               <>
                 {props.layout.showComposerDividers ? <FooterDivider theme={props.theme} /> : null}
                 <ToolbarButton
-                  icon={composerTraitsIcon(props.modelSelection)}
+                  icon={composerTraitsIcon(props.modelSelection, props.provider)}
                   label={
                     props.layout.showComposerTraitsLabel
                       ? truncateTitleForDisplay(traitsLabel, 14)
@@ -2179,6 +2176,13 @@ function composerPlaceholder(input: {
   return "Ask anything or @tag files/folders";
 }
 
+function isClaudeSelection(
+  modelSelection: ModelSelection | null,
+  provider?: ServerProvider | null,
+): boolean {
+  return provider?.driver === "claudeAgent" || modelSelection?.instanceId === "claudeAgent";
+}
+
 function providerIcon(provider: string | null | undefined): string {
   return provider === "claudeAgent" ? "✱" : "󰚩";
 }
@@ -2187,10 +2191,13 @@ function providerColor(provider: string | null | undefined, theme: TuiTheme): st
   return provider === "claudeAgent" ? theme.palette.claude : theme.palette.muted;
 }
 
-function modelControlLabel(modelSelection: ModelSelection | null): string {
+function modelControlLabel(
+  modelSelection: ModelSelection | null,
+  provider?: ServerProvider | null,
+): string {
   if (!modelSelection) return "No model";
   const model = displayText(modelSelection.model);
-  if (modelSelection.provider === "codex") {
+  if (!isClaudeSelection(modelSelection, provider)) {
     return model.replace(/^gpt-/i, "GPT-").replace(/-codex$/i, "");
   }
   return model
@@ -2201,16 +2208,20 @@ function modelControlLabel(modelSelection: ModelSelection | null): string {
 
 function composerTraitsLabel(
   modelSelection: ModelSelection | null,
+  provider: ServerProvider | null,
   runtimeMode: RuntimeMode,
 ): string | null {
-  if (modelSelection?.provider === "claudeAgent") return "Thinking";
+  if (isClaudeSelection(modelSelection, provider)) return "Thinking";
   if (runtimeMode === "full-access") return "High";
   if (runtimeMode === "auto-accept-edits") return "Medium";
   return "Low";
 }
 
-function composerTraitsIcon(modelSelection: ModelSelection | null): string {
-  return modelSelection?.provider === "claudeAgent" ? "󰚩" : "󰔟";
+function composerTraitsIcon(
+  modelSelection: ModelSelection | null,
+  provider?: ServerProvider | null,
+): string {
+  return isClaudeSelection(modelSelection, provider) ? "󰚩" : "󰔟";
 }
 
 function interactionLabel(mode: ProviderInteractionMode): string {
