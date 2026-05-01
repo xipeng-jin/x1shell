@@ -309,7 +309,7 @@ function threadDetail(id: string) {
     id,
     projectId: "project-a",
     title: "Thread",
-    modelSelection: { provider: "codex", model: "gpt-5" },
+    modelSelection: { instanceId: "codex", model: "gpt-5" },
     runtimeMode: "full-access",
     interactionMode: "default",
     branch: "main",

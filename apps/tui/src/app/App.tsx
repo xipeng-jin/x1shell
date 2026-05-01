@@ -51,6 +51,11 @@ import {
   displayThread,
 } from "../domain/display.js";
 import {
+  deriveProviderInstanceEntries,
+  findProviderInstance,
+  providerSelectable,
+} from "../domain/providerInstances.js";
+import {
   buildUserInputAnswers,
   derivePendingApprovals,
   derivePendingUserInputs,
@@ -679,15 +684,18 @@ export function App(props: {
 
   function cycleModel() {
     if (!draftProjectId || !status.config?.providers.length) return;
-    const models = status.config.providers.flatMap((provider) =>
-      provider.enabled
-        ? provider.models.map((model) => ({ provider: provider.provider, model: model.slug }))
+    const models = deriveProviderInstanceEntries(status.config.providers).flatMap((entry) =>
+      providerSelectable(entry.provider)
+        ? entry.models.map((model) => ({
+            instanceId: entry.instanceId,
+            model: model.slug,
+          }))
         : [],
     );
     if (models.length === 0) return;
     const index = models.findIndex(
       (entry) =>
-        entry.provider === selectedModelSelection?.provider &&
+        entry.instanceId === selectedModelSelection?.instanceId &&
         entry.model === selectedModelSelection?.model,
     );
     const next = models[(index + 1 + models.length) % models.length]!;
@@ -1006,8 +1014,7 @@ function findProvider(
   providers: readonly ServerProvider[],
   modelSelection: ModelSelection | null,
 ): ServerProvider | null {
-  if (!modelSelection) return providers.find((provider) => provider.enabled) ?? null;
-  return providers.find((provider) => provider.provider === modelSelection.provider) ?? null;
+  return findProviderInstance(providers, modelSelection?.instanceId);
 }
 
 function nextRuntimeMode(runtimeMode: RuntimeMode): RuntimeMode {

@@ -33,7 +33,8 @@ describe("TUI error banner derivation", () => {
         error: null,
       },
       provider: {
-        provider: "codex",
+        instanceId: "codex",
+        driver: "codex",
         displayName: "Codex",
         enabled: true,
         installed: true,
@@ -44,5 +45,37 @@ describe("TUI error banner derivation", () => {
     });
 
     expect(banners[0]).toMatchObject({ title: "Provider auth required" });
+  });
+
+  it("reports unavailable provider instances before disabled state", () => {
+    const banners = deriveErrorBanners({
+      status: {
+        connection: "connected",
+        auth: "owner",
+        config: { issues: [] } as never,
+        latestWelcome: null,
+        latestReady: null,
+        shell: null,
+        error: null,
+      },
+      provider: {
+        instanceId: "codex_fork",
+        driver: "forkDriver",
+        displayName: "Fork Driver",
+        enabled: false,
+        installed: false,
+        availability: "unavailable",
+        unavailableReason: "Driver forkDriver is not available in this build.",
+        status: "disabled",
+        auth: { status: "unknown" },
+        models: [],
+      } as never,
+    });
+
+    expect(banners[0]).toMatchObject({
+      title: "Provider unavailable",
+      detail: "Driver forkDriver is not available in this build.",
+      actionHint: "Open settings",
+    });
   });
 });

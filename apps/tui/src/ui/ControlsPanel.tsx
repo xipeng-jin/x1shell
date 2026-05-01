@@ -6,6 +6,7 @@ import type {
   ServerProvider,
 } from "@t3tools/contracts";
 import { displayText } from "../domain/display.js";
+import { providerLabel } from "../domain/providerInstances.js";
 import type { TuiTheme } from "../terminal/theme.js";
 
 export function ControlsPanel(props: {
@@ -17,7 +18,8 @@ export function ControlsPanel(props: {
   readonly theme: TuiTheme;
 }): React.ReactNode {
   const providerName =
-    props.provider?.displayName ?? props.modelSelection?.provider ?? "no provider";
+    (props.provider ? providerLabel(props.provider) : props.modelSelection?.instanceId) ??
+    "no provider";
   const model = props.modelSelection?.model ?? "unset";
   return (
     <text fg={props.theme.palette.muted}>

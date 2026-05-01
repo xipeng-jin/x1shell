@@ -18,6 +18,10 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { createModelSelection, resolveModelSlugForProvider } from "@t3tools/shared/model";
+import {
+  DEFAULT_TUI_PROVIDER_DRIVER,
+  DEFAULT_TUI_PROVIDER_INSTANCE_ID,
+} from "./providerInstances.js";
 
 type ClientThreadTurnStartCommand = Extract<
   ClientOrchestrationCommand,
@@ -225,7 +229,10 @@ export function buildThreadInteractionModeSet(input: {
 
 function resolveProjectModelSelection(project: OrchestrationProjectShell): ModelSelection {
   if (project.defaultModelSelection) return project.defaultModelSelection;
-  return createModelSelection("codex", resolveModelSlugForProvider("codex", null));
+  return createModelSelection(
+    DEFAULT_TUI_PROVIDER_INSTANCE_ID,
+    resolveModelSlugForProvider(DEFAULT_TUI_PROVIDER_DRIVER, null),
+  );
 }
 
 function randomUUID(): string {

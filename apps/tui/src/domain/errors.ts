@@ -1,6 +1,7 @@
 import type { ServerProvider, ServerConfig } from "@t3tools/contracts";
 import type { TuiServerStatusSnapshot } from "../state/serverConfigStore.js";
 import { displayText } from "./display.js";
+import { providerLabel } from "./providerInstances.js";
 
 export type TuiErrorBannerKind = "info" | "warning" | "danger";
 
@@ -72,31 +73,38 @@ function deriveProviderBanner(
       "No provider is available for the selected model.",
       "Refresh providers",
     );
+  if (provider.availability === "unavailable") {
+    return warning(
+      "Provider unavailable",
+      displayText(provider.unavailableReason ?? `${providerLabel(provider)} is unavailable.`),
+      "Open settings",
+    );
+  }
   if (!provider.enabled || provider.status === "disabled") {
     return warning(
       "Provider disabled",
-      `${displayText(provider.displayName ?? provider.provider)} is disabled.`,
+      `${displayText(providerLabel(provider))} is disabled.`,
       "Open settings",
     );
   }
   if (provider.auth.status === "unauthenticated") {
     return warning(
       "Provider auth required",
-      `${displayText(provider.displayName ?? provider.provider)} is not authenticated.`,
+      `${displayText(providerLabel(provider))} is not authenticated.`,
       "Attach auth in the web UI or provider CLI",
     );
   }
   if (provider.status === "error") {
     return danger(
       "Provider error",
-      displayText(provider.message ?? `${provider.provider} is unavailable.`),
+      displayText(provider.message ?? `${providerLabel(provider)} is unavailable.`),
       "Refresh providers",
     );
   }
   if (provider.status === "warning") {
     return warning(
       "Provider warning",
-      displayText(provider.message ?? `${provider.provider} reported a warning.`),
+      displayText(provider.message ?? `${providerLabel(provider)} reported a warning.`),
       "Refresh providers",
     );
   }
