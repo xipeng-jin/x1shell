@@ -14,7 +14,7 @@ describe("TUI keybinding action registry", () => {
         "runtime.next",
         "interaction.next",
         "providers.refresh",
-        "git.refresh",
+        "vcs.refresh",
       ]),
     );
   });

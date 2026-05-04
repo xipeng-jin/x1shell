@@ -26,7 +26,7 @@ export function TuiRuntimeApp(props: {
   onRefreshProviders?: () => Promise<unknown>;
   onGetTurnDiff?: Parameters<typeof App>[0]["onGetTurnDiff"];
   onGetFullThreadDiff?: Parameters<typeof App>[0]["onGetFullThreadDiff"];
-  onRefreshGitStatus?: Parameters<typeof App>[0]["onRefreshGitStatus"];
+  onRefreshVcsStatus?: Parameters<typeof App>[0]["onRefreshVcsStatus"];
   onRequestExit: () => void;
 }) {
   const serverStatus = useSyncExternalStore(
@@ -79,7 +79,7 @@ export function TuiRuntimeApp(props: {
       {...(props.onRefreshProviders ? { onRefreshProviders: props.onRefreshProviders } : {})}
       {...(props.onGetTurnDiff ? { onGetTurnDiff: props.onGetTurnDiff } : {})}
       {...(props.onGetFullThreadDiff ? { onGetFullThreadDiff: props.onGetFullThreadDiff } : {})}
-      {...(props.onRefreshGitStatus ? { onRefreshGitStatus: props.onRefreshGitStatus } : {})}
+      {...(props.onRefreshVcsStatus ? { onRefreshVcsStatus: props.onRefreshVcsStatus } : {})}
       onRequestExit={props.onRequestExit}
     />
   );

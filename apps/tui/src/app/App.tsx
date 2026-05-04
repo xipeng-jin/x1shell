@@ -145,7 +145,7 @@ export function App(props: {
   onGetFullThreadDiff?: (
     input: OrchestrationGetFullThreadDiffInput,
   ) => Promise<OrchestrationGetFullThreadDiffResult>;
-  onRefreshGitStatus?: (cwd: string) => Promise<VcsStatusResult>;
+  onRefreshVcsStatus?: (cwd: string) => Promise<VcsStatusResult>;
   debugEntries?: readonly TuiDebugEntry[];
   onRequestExit: () => void;
 }): React.ReactNode {
@@ -462,7 +462,7 @@ export function App(props: {
       return;
     }
     if (composerText.length === 0 && key.name === "g") {
-      void performAction("git.refresh");
+      void performAction("vcs.refresh");
       return;
     }
     if (composerText.length === 0 && key.name === "m") {
@@ -704,8 +704,8 @@ export function App(props: {
       case "providers.refresh":
         await props.onRefreshProviders?.();
         return;
-      case "git.refresh":
-        await refreshGit();
+      case "vcs.refresh":
+        await refreshVcs();
         return;
     }
   }
@@ -773,12 +773,12 @@ export function App(props: {
     }
   }
 
-  async function refreshGit() {
+  async function refreshVcs() {
     const cwd =
       activeThreadHeader?.worktreePath ?? activeProject?.workspaceRoot ?? status.config?.cwd;
     if (!cwd) return;
     try {
-      const next = await props.onRefreshGitStatus?.(cwd);
+      const next = await props.onRefreshVcsStatus?.(cwd);
       if (next) setGitStatus(next);
     } catch (error) {
       setSubmitError(displayText(String(error)));
@@ -942,7 +942,7 @@ export function App(props: {
             }
           }}
           onToggleDiff={() => void performAction("diff.toggle")}
-          onRefreshGit={() => void performAction("git.refresh")}
+          onRefreshVcs={() => void performAction("vcs.refresh")}
           viewportColumns={dimensions.width}
           gitStatus={gitStatus}
           diffActive={visiblePanel === "diff"}
@@ -1274,7 +1274,7 @@ function MainHeader(props: {
   showSidebar: boolean;
   onToggleSidebar: () => void;
   onToggleDiff: () => void;
-  onRefreshGit: () => void;
+  onRefreshVcs: () => void;
   viewportColumns: number;
   gitStatus: VcsStatusResult | null;
   diffActive: boolean;
@@ -1346,7 +1346,7 @@ function MainHeader(props: {
           active={props.focusArea === "controls"}
           onPress={() => {
             props.onFocusControls();
-            props.onRefreshGit();
+            props.onRefreshVcs();
           }}
           theme={props.theme}
         />

@@ -357,10 +357,10 @@ async function runInteractive(
           if (!controller) return Promise.reject(new Error("Not connected."));
           return controller.getFullThreadDiff(input);
         }}
-        onRefreshGitStatus={(cwd) => {
-          debugBuffer.push("info", "refresh git status", { cwd });
+        onRefreshVcsStatus={(cwd) => {
+          debugBuffer.push("info", "refresh vcs status", { cwd });
           if (!controller) return Promise.reject(new Error("Not connected."));
-          return controller.refreshGitStatus(cwd);
+          return controller.refreshVcsStatus(cwd);
         }}
         onRequestExit={() => void shutdown(0)}
       />,
