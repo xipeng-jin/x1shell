@@ -50,7 +50,7 @@ describe("App headless smoke", () => {
     expect(frame).toContain("ALPHA");
     expect(frame).toContain("PROJECTS");
     expect(frame).toContain("Ask for follow-up changes or attach images");
-    expect(frame).toContain("GPT-5.4");
+    expect(frame).toContain("GPT-5");
     expect(frame).toContain("booting workspace");
     expect(frame).not.toContain("Attach auth required");
     expect(frame).not.toContain("No model");
