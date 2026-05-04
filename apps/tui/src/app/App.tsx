@@ -5,7 +5,6 @@ import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   type ClientOrchestrationCommand,
-  type GitStatusResult,
   type ModelSelection,
   type OrchestrationGetFullThreadDiffInput,
   type OrchestrationGetFullThreadDiffResult,
@@ -20,6 +19,7 @@ import {
   type ServerProvider,
   type ThreadId,
   type UploadChatAttachment,
+  type VcsStatusResult,
 } from "@t3tools/contracts";
 import type { TuiPaths } from "../cli/config.js";
 import {
@@ -145,7 +145,7 @@ export function App(props: {
   onGetFullThreadDiff?: (
     input: OrchestrationGetFullThreadDiffInput,
   ) => Promise<OrchestrationGetFullThreadDiffResult>;
-  onRefreshGitStatus?: (cwd: string) => Promise<GitStatusResult>;
+  onRefreshGitStatus?: (cwd: string) => Promise<VcsStatusResult>;
   debugEntries?: readonly TuiDebugEntry[];
   onRequestExit: () => void;
 }): React.ReactNode {
@@ -193,7 +193,7 @@ export function App(props: {
   const [diffCache, setDiffCache] = useState<Readonly<Record<string, string>>>({});
   const diffRequestRef = useRef(0);
   const activeDiffThreadIdRef = useRef<ThreadId | null>(null);
-  const [gitStatus, setGitStatus] = useState<GitStatusResult | null>(null);
+  const [gitStatus, setGitStatus] = useState<VcsStatusResult | null>(null);
   const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
   const [customInputAnswers, setCustomInputAnswers] = useState<Readonly<Record<string, string>>>(
     {},
@@ -998,7 +998,7 @@ export function App(props: {
           runtimeMode={selectedRuntimeMode}
           interactionMode={selectedInteractionMode}
           attachmentCount={draftAttachments.length}
-          branch={activeThreadHeader?.branch ?? gitStatus?.branch ?? null}
+          branch={activeThreadHeader?.branch ?? gitStatus?.refName ?? null}
           showWorkspaceFooter={Boolean(draftProjectId && (gitStatus || activeThreadHeader?.branch))}
           hasActiveThread={Boolean(activeThreadHeader)}
           hasDraftThread={Boolean(draftProjectId && !activeThreadHeader)}
@@ -1276,7 +1276,7 @@ function MainHeader(props: {
   onToggleDiff: () => void;
   onRefreshGit: () => void;
   viewportColumns: number;
-  gitStatus: GitStatusResult | null;
+  gitStatus: VcsStatusResult | null;
   diffActive: boolean;
   focusArea: LandingFocusArea;
   onFocusControls: () => void;

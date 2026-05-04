@@ -19,13 +19,13 @@ import type { createOrchestrationStore } from "../state/orchestrationStore.js";
 import type { createThreadDetailStore } from "../state/threadDetailStore.js";
 import { isSnapshotRequiredThreadEvent } from "../state/threadDetailStore.js";
 import type {
-  GitStatusResult,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   ServerSettingsPatch,
   ThreadId,
+  VcsStatusResult,
 } from "@t3tools/contracts";
 
 type ServerConfigStore = ReturnType<typeof createServerConfigStore>;
@@ -84,7 +84,7 @@ export interface TuiConnectionController {
   ) => Promise<OrchestrationGetFullThreadDiffResult>;
   readonly refreshProviders: WsRpcClient["server"]["refreshProviders"];
   readonly updateSettings: WsRpcClient["server"]["updateSettings"];
-  readonly refreshGitStatus: (cwd: string) => Promise<GitStatusResult>;
+  readonly refreshGitStatus: (cwd: string) => Promise<VcsStatusResult>;
   readonly dispose: () => Promise<void>;
 }
 
@@ -364,7 +364,7 @@ export function createTuiConnectionController(input: {
     },
     refreshGitStatus: (cwd) => {
       if (!current) return Promise.reject(new Error("Not connected."));
-      return current.client.git.refreshStatus({ cwd });
+      return current.client.vcs.refreshStatus({ cwd });
     },
     dispose: async () => {
       disposed = true;

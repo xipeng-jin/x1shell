@@ -1,7 +1,7 @@
 import type {
-  GitStatusLocalResult,
-  GitStatusRemoteResult,
-  GitStatusStreamEvent,
+  VcsStatusLocalResult,
+  VcsStatusRemoteResult,
+  VcsStatusStreamEvent,
 } from "@t3tools/contracts";
 import { ORCHESTRATION_WS_METHODS } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vitest";
@@ -9,16 +9,16 @@ import { describe, expect, it, vi } from "vitest";
 import { createWsRpcClient } from "./rpcClient.ts";
 import type { WsTransport } from "./wsTransport.ts";
 
-const baseLocalStatus: GitStatusLocalResult = {
+const baseLocalStatus: VcsStatusLocalResult = {
   isRepo: true,
-  hasOriginRemote: true,
-  isDefaultBranch: false,
-  branch: "feature/demo",
+  hasPrimaryRemote: true,
+  isDefaultRef: false,
+  refName: "feature/demo",
   hasWorkingTreeChanges: false,
   workingTree: { files: [], insertions: 0, deletions: 0 },
 };
 
-const baseRemoteStatus: GitStatusRemoteResult = {
+const baseRemoteStatus: VcsStatusRemoteResult = {
   hasUpstream: true,
   aheadCount: 0,
   behindCount: 0,
@@ -45,7 +45,7 @@ describe("ws rpc client", () => {
             hasWorkingTreeChanges: true,
           },
         },
-      ] satisfies GitStatusStreamEvent[]) {
+      ] satisfies VcsStatusStreamEvent[]) {
         listener(event as TValue);
       }
       return () => undefined;
@@ -65,7 +65,7 @@ describe("ws rpc client", () => {
     const client = createWsRpcClient(transport as unknown as WsTransport);
     const listener = vi.fn();
 
-    client.git.onStatus({ cwd: "/repo" }, listener);
+    client.vcs.onStatus({ cwd: "/repo" }, listener);
 
     expect(listener.mock.calls).toEqual([
       [
