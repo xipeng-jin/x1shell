@@ -18,7 +18,7 @@ export type TuiActionId =
   | "interaction.next"
   | "connection.reconnect"
   | "providers.refresh"
-  | "git.refresh";
+  | "vcs.refresh";
 
 export interface TuiActionDefinition {
   readonly id: TuiActionId;
@@ -90,7 +90,7 @@ export const TUI_ACTIONS: readonly TuiActionDefinition[] = [
   action("interaction.next", "Interaction mode", "Cycle default or plan mode.", ["i"], "controls"),
   action("connection.reconnect", "Reconnect", "Reconnect and resubscribe.", ["R"], "system"),
   action("providers.refresh", "Refresh providers", "Refresh provider status.", ["p"], "system"),
-  action("git.refresh", "Refresh git", "Refresh read-only git status.", ["g"], "system"),
+  action("vcs.refresh", "Refresh VCS", "Refresh read-only VCS status.", ["g"], "system"),
 ];
 
 export function getActionDefinition(id: TuiActionId): TuiActionDefinition {

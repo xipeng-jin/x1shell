@@ -84,7 +84,7 @@ export interface TuiConnectionController {
   ) => Promise<OrchestrationGetFullThreadDiffResult>;
   readonly refreshProviders: WsRpcClient["server"]["refreshProviders"];
   readonly updateSettings: WsRpcClient["server"]["updateSettings"];
-  readonly refreshGitStatus: (cwd: string) => Promise<VcsStatusResult>;
+  readonly refreshVcsStatus: (cwd: string) => Promise<VcsStatusResult>;
   readonly dispose: () => Promise<void>;
 }
 
@@ -362,7 +362,7 @@ export function createTuiConnectionController(input: {
       if (!current) return Promise.reject(new Error("Not connected."));
       return current.client.server.updateSettings(patch);
     },
-    refreshGitStatus: (cwd) => {
+    refreshVcsStatus: (cwd) => {
       if (!current) return Promise.reject(new Error("Not connected."));
       return current.client.vcs.refreshStatus({ cwd });
     },
