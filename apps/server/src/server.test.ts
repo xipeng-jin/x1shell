@@ -107,23 +107,12 @@ import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
-import type { VcsDriverShape } from "./vcs/VcsDriver.ts";
-import {
-  VcsStatusBroadcaster,
-  type VcsStatusBroadcasterShape,
-  layer as VcsStatusBroadcasterLayer,
-} from "./vcs/VcsStatusBroadcaster.ts";
-import {
-  VcsDriverRegistry,
-  type VcsDriverRegistryShape,
-  type VcsDriverHandle,
-} from "./vcs/VcsDriverRegistry.ts";
-import { layer as VcsProvisioningServiceLayer } from "./vcs/VcsProvisioningService.ts";
-import { layer as GitWorkflowServiceLayer } from "./git/GitWorkflowService.ts";
-import {
-  SourceControlRepositoryService,
-  type SourceControlRepositoryServiceShape,
-} from "./sourceControl/SourceControlRepositoryService.ts";
+import * as VcsDriver from "./vcs/VcsDriver.ts";
+import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
+import * as VcsDriverRegistry from "./vcs/VcsDriverRegistry.ts";
+import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
+import * as GitWorkflowService from "./git/GitWorkflowService.ts";
+import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore.ts";
 import { ServerAuthLive } from "./auth/Layers/ServerAuth.ts";
 
@@ -331,12 +320,12 @@ const buildAppUnderTest = (options?: {
     providerRegistry?: Partial<ProviderRegistryShape>;
     serverSettings?: Partial<ServerSettingsShape>;
     open?: Partial<OpenShape>;
-    vcsDriver?: Partial<VcsDriverShape>;
-    vcsDriverRegistry?: Partial<VcsDriverRegistryShape>;
+    vcsDriver?: Partial<VcsDriver.VcsDriverShape>;
+    vcsDriverRegistry?: Partial<VcsDriverRegistry.VcsDriverRegistryShape>;
     gitVcsDriver?: Partial<GitVcsDriver.GitVcsDriverShape>;
     gitManager?: Partial<GitManagerShape>;
-    sourceControlRepositoryService?: Partial<SourceControlRepositoryServiceShape>;
-    vcsStatusBroadcaster?: Partial<VcsStatusBroadcasterShape>;
+    sourceControlRepositoryService?: Partial<SourceControlRepositoryService.SourceControlRepositoryServiceShape>;
+    vcsStatusBroadcaster?: Partial<VcsStatusBroadcaster.VcsStatusBroadcasterShape>;
     projectSetupScriptRunner?: Partial<ProjectSetupScriptRunnerShape>;
     terminalManager?: Partial<TerminalManagerShape>;
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
@@ -384,7 +373,7 @@ const buildAppUnderTest = (options?: {
       ...options?.config,
     };
     const layerConfig = Layer.succeed(ServerConfig, config);
-    const defaultVcsDriver: VcsDriverShape = {
+    const defaultVcsDriver: VcsDriver.VcsDriverShape = {
       capabilities: {
         kind: "git",
         supportsWorktrees: true,
@@ -426,7 +415,7 @@ const buildAppUnderTest = (options?: {
       initRepository: () => Effect.void,
       ...options?.layers?.vcsDriver,
     };
-    const vcsDriverRegistryLayer = Layer.mock(VcsDriverRegistry)({
+    const vcsDriverRegistryLayer = Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
       get: () => Effect.succeed(defaultVcsDriver),
       detect: (input) =>
         defaultVcsDriver.detectRepository(input.cwd).pipe(
@@ -456,7 +445,7 @@ const buildAppUnderTest = (options?: {
                   kind: repository.kind,
                   repository,
                   driver: defaultVcsDriver,
-                } satisfies VcsDriverHandle)
+                } satisfies VcsDriverRegistry.VcsDriverHandle)
               : null,
           ),
         ),
@@ -498,19 +487,19 @@ const buildAppUnderTest = (options?: {
       ),
       ProjectFaviconResolverLive,
     );
-    const gitWorkflowLayer = GitWorkflowServiceLayer.pipe(
+    const gitWorkflowLayer = GitWorkflowService.layer.pipe(
       Layer.provideMerge(vcsDriverRegistryLayer),
       Layer.provideMerge(gitVcsDriverLayer),
       Layer.provideMerge(gitManagerLayer),
     );
-    const vcsProvisioningLayer = VcsProvisioningServiceLayer.pipe(
+    const vcsProvisioningLayer = VcsProvisioningService.layer.pipe(
       Layer.provide(vcsDriverRegistryLayer),
     );
     const vcsStatusBroadcasterLayer = options?.layers?.vcsStatusBroadcaster
-      ? Layer.mock(VcsStatusBroadcaster)({
+      ? Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
           ...options.layers.vcsStatusBroadcaster,
         })
-      : VcsStatusBroadcasterLayer.pipe(Layer.provide(gitWorkflowLayer));
+      : VcsStatusBroadcaster.layer.pipe(Layer.provide(gitWorkflowLayer));
 
     const servedRoutesLayer = HttpRouter.serve(makeRoutesLayer, {
       disableListenLog: true,
@@ -554,7 +543,7 @@ const buildAppUnderTest = (options?: {
       Layer.provide(gitWorkflowLayer),
       Layer.provide(vcsProvisioningLayer),
       Layer.provide(
-        Layer.mock(SourceControlRepositoryService)({
+        Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
           ...options?.layers?.sourceControlRepositoryService,
         }),
       ),
