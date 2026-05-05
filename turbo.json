@@ -23,7 +23,7 @@
     "T3CODE_OTLP_EXPORT_INTERVAL_MS",
     "T3CODE_OTLP_SERVICE_NAME"
   ],
-  "globalPassThroughEnv": ["PATHEXT", "TMPDIR"],
+  "globalPassThroughEnv": ["ASTRO_TELEMETRY_DISABLED", "PATHEXT", "TELEMETRY_DISABLED", "TMPDIR"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

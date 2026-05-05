@@ -42,6 +42,7 @@
     "build:tui": "turbo run build --filter=@x1shell/tui",
     "build:marketing": "turbo run build --filter=@t3tools/marketing",
     "build:desktop": "turbo run build --filter=@t3tools/desktop --filter=t3",
+    "build:ci:products": "node scripts/build-ci-products.ts",
     "typecheck": "turbo run typecheck",
     "lint": "oxlint --report-unused-disable-directives",
     "test": "mkdir -p ../.x1shell-tmp && TMPDIR=$(cd ../.x1shell-tmp && pwd) turbo run test",
