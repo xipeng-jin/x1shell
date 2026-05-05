@@ -701,6 +701,9 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               const domainEventSubscription = yield* orchestrationEngine.subscribeDomainEvents;
               const domainEventQueue = yield* acquireSubscriptionQueue(domainEventSubscription);
               const snapshot = yield* projectionSnapshotQuery.getShellSnapshot().pipe(
+                Effect.tapError((cause) =>
+                  Effect.logError("orchestration shell snapshot load failed", { cause }),
+                ),
                 Effect.mapError(
                   (cause) =>
                     new OrchestrationGetSnapshotError({
@@ -1045,6 +1048,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                   version: 1 as const,
                   type: "keybindingsUpdated" as const,
                   payload: {
+                    keybindings: event.keybindings,
                     issues: event.issues,
                   },
                 })),

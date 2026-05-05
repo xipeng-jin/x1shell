@@ -75,7 +75,14 @@ export function createServerConfigStore(initial?: Partial<TuiServerStatusSnapsho
           config: { ...snapshot.config, settings: event.payload.settings },
         };
       } else if (snapshot.config && event.type === "keybindingsUpdated") {
-        snapshot = { ...snapshot, config: { ...snapshot.config, issues: event.payload.issues } };
+        snapshot = {
+          ...snapshot,
+          config: {
+            ...snapshot.config,
+            keybindings: event.payload.keybindings,
+            issues: event.payload.issues,
+          },
+        };
       }
       emit();
     },

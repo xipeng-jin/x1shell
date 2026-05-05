@@ -24,3 +24,4 @@ __screenshots__/
 .tanstack
 squashfs-root/
 .codex
+.vercel
