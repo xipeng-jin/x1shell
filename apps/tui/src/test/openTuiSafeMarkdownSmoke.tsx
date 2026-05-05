@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { createTestRenderer } from "@opentui/core/testing";
 import { createRoot } from "@opentui/react";
+import { act } from "react";
 import { createSafeMarkdownStream, SafeMarkdown } from "../terminal/safeMarkdown.js";
 
 const framePath = process.argv[2];
@@ -21,12 +22,13 @@ const root = createRoot(setup.renderer);
 try {
   const frames: string[] = [];
   const renderContent = async (content: string) => {
-    root.render(
-      <box width="100%" height="100%">
-        <SafeMarkdown content={content} />
-      </box>,
-    );
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    act(() => {
+      root.render(
+        <box width="100%" height="100%">
+          <SafeMarkdown content={content} />
+        </box>,
+      );
+    });
     await setup.renderOnce();
     frames.push(setup.captureCharFrame());
   };
@@ -44,6 +46,8 @@ try {
   await mkdir(dirname(framePath), { recursive: true });
   await writeFile(framePath, frames.join("\n"), "utf8");
 } finally {
-  root.unmount();
+  act(() => {
+    root.unmount();
+  });
   setup.renderer.destroy();
 }
