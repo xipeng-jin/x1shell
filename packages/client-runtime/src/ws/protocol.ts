@@ -13,13 +13,42 @@ export interface SafeWsConnectionMetadata {
   readonly queryParamNames: readonly string[];
 }
 
+export interface WsProtocolCloseContext {
+  readonly intentional: boolean;
+}
+
 export interface WsProtocolLifecycleHandlers {
+  readonly isActive?: () => boolean;
+  readonly isCloseIntentional?: () => boolean;
   readonly onAttempt?: (metadata: SafeWsConnectionMetadata) => void;
   readonly onOpen?: (metadata: SafeWsConnectionMetadata) => void;
+  readonly onHeartbeatPing?: () => void;
+  readonly onHeartbeatPong?: () => void;
+  readonly onHeartbeatTimeout?: () => void;
+  readonly onRequestStart?: (metadata: {
+    readonly requestId: string;
+    readonly tag: string;
+    readonly stream: boolean;
+  }) => void;
+  readonly onRequestChunk?: (metadata: {
+    readonly requestId: string;
+    readonly tag: string;
+    readonly chunkCount: number;
+  }) => void;
+  readonly onRequestExit?: (metadata: {
+    readonly requestId: string;
+    readonly tag: string;
+    readonly stream: boolean;
+  }) => void;
+  readonly onRequestInterrupt?: (metadata: {
+    readonly requestId: string;
+    readonly tag?: string;
+  }) => void;
   readonly onError?: (message: string, metadata: SafeWsConnectionMetadata | null) => void;
   readonly onClose?: (
     details: { readonly code: number; readonly reason: string },
     metadata: SafeWsConnectionMetadata,
+    context: WsProtocolCloseContext,
   ) => void;
 }
 
@@ -101,6 +130,17 @@ export function createWsRpcProtocolLayer(
   url: WsRpcProtocolSocketUrlProvider,
   options: WsRpcProtocolOptions = {},
 ) {
+  const requestHooksService = (
+    RpcClient as unknown as {
+      readonly RequestHooks?: ContextServiceLike;
+    }
+  ).RequestHooks;
+  const connectionHooksService = (
+    RpcClient as unknown as {
+      readonly ConnectionHooks?: ContextServiceLike;
+    }
+  ).ConnectionHooks;
+  const hasRequestHooks = requestHooksService !== undefined;
   const resolvedUrlEffect =
     typeof url === "function"
       ? Effect.promise(() => url()).pipe(
@@ -115,37 +155,49 @@ export function createWsRpcProtocolLayer(
       : resolveWsRpcSocketUrl(url);
 
   const webSocketConstructor = resolveWebSocketConstructor(options.webSocketConstructor);
+  const isActive = options.lifecycle?.isActive ?? (() => true);
   const trackingWebSocketConstructorLayer = Layer.succeed(
     Socket.WebSocketConstructor,
     (socketUrl, protocols) => {
       const metadata = getSafeWsConnectionMetadata(socketUrl);
-      options.lifecycle?.onAttempt?.(metadata);
+      if (isActive()) {
+        options.lifecycle?.onAttempt?.(metadata);
+      }
       const socket = new webSocketConstructor(socketUrl, protocols);
 
       socket.addEventListener(
         "open",
         () => {
-          options.lifecycle?.onOpen?.(metadata);
+          if (isActive()) {
+            options.lifecycle?.onOpen?.(metadata);
+          }
         },
         { once: true },
       );
       socket.addEventListener(
         "error",
         () => {
-          options.lifecycle?.onError?.("Unable to connect to the T3 server WebSocket.", metadata);
+          if (isActive()) {
+            options.lifecycle?.onError?.("Unable to connect to the T3 server WebSocket.", metadata);
+          }
         },
         { once: true },
       );
       socket.addEventListener(
         "close",
         (event) => {
-          options.lifecycle?.onClose?.(
-            {
-              code: event.code,
-              reason: redactRuntimeSecretText(event.reason),
-            },
-            metadata,
-          );
+          if (isActive()) {
+            options.lifecycle?.onClose?.(
+              {
+                code: event.code,
+                reason: redactRuntimeSecretText(event.reason),
+              },
+              metadata,
+              {
+                intentional: options.lifecycle?.isCloseIntentional?.() ?? false,
+              },
+            );
+          }
         },
         { once: true },
       );
@@ -172,7 +224,7 @@ export function createWsRpcProtocolLayer(
         ...protocol,
         run: (clientId, writeResponse) =>
           protocol.run(clientId, (response) => {
-            if (response._tag === "Chunk" || response._tag === "Exit") {
+            if (!hasRequestHooks && (response._tag === "Chunk" || response._tag === "Exit")) {
               options.requestTracking?.onRequestAcknowledged?.({
                 requestId: response.requestId,
               });
@@ -182,7 +234,7 @@ export function createWsRpcProtocolLayer(
             return writeResponse(response);
           }),
         send: (clientId, request, transferables) => {
-          if (request._tag === "Request") {
+          if (!hasRequestHooks && request._tag === "Request") {
             options.requestTracking?.onRequestSent?.({
               requestId: request.id,
               tag: request.tag,
@@ -193,6 +245,104 @@ export function createWsRpcProtocolLayer(
       }),
     ),
   );
+  const requestHooksLayer = requestHooksService
+    ? succeedDynamicService(
+        requestHooksService,
+        requestHooksService.of({
+          onRequestStart: (info: RequestHookInfo) =>
+            Effect.sync(() => {
+              if (!isActive()) return;
+              const metadata = {
+                requestId: String(info.id),
+                tag: info.tag,
+                stream: info.stream,
+              };
+              options.lifecycle?.onRequestStart?.(metadata);
+              options.requestTracking?.onRequestSent?.({
+                requestId: metadata.requestId,
+                tag: metadata.tag,
+              });
+            }),
+          onRequestChunk: (info: RequestHookInfo & { readonly chunkCount: number }) =>
+            Effect.sync(() => {
+              if (!isActive()) return;
+              const requestId = String(info.id);
+              options.lifecycle?.onRequestChunk?.({
+                requestId,
+                tag: info.tag,
+                chunkCount: info.chunkCount,
+              });
+              options.requestTracking?.onRequestAcknowledged?.({ requestId });
+            }),
+          onRequestExit: (info: RequestHookInfo) =>
+            Effect.sync(() => {
+              if (!isActive()) return;
+              const requestId = String(info.id);
+              options.lifecycle?.onRequestExit?.({
+                requestId,
+                tag: info.tag,
+                stream: info.stream,
+              });
+              options.requestTracking?.onRequestAcknowledged?.({ requestId });
+            }),
+          onRequestInterrupt: (info: { readonly id: unknown; readonly tag?: string }) =>
+            Effect.sync(() => {
+              if (!isActive()) return;
+              const requestId = String(info.id);
+              options.lifecycle?.onRequestInterrupt?.({
+                requestId,
+                ...(info.tag === undefined ? {} : { tag: info.tag }),
+              });
+              options.requestTracking?.onRequestAcknowledged?.({ requestId });
+            }),
+        }),
+      )
+    : Layer.empty;
+  const connectionHooksLayer = connectionHooksService
+    ? succeedDynamicService(
+        connectionHooksService,
+        connectionHooksService.of({
+          onConnect: Effect.void,
+          onDisconnect: Effect.void,
+          onPing: Effect.sync(() => {
+            if (isActive()) {
+              options.lifecycle?.onHeartbeatPing?.();
+            }
+          }),
+          onPong: Effect.sync(() => {
+            if (isActive()) {
+              options.lifecycle?.onHeartbeatPong?.();
+            }
+          }),
+          onPingTimeout: Effect.sync(() => {
+            if (isActive()) {
+              options.requestTracking?.onProtocolReset?.();
+              options.lifecycle?.onHeartbeatTimeout?.();
+            }
+          }),
+        }),
+      )
+    : Layer.empty;
 
-  return protocolLayer.pipe(Layer.provide(Layer.mergeAll(socketLayer, RpcSerialization.layerJson)));
+  return Layer.mergeAll(
+    protocolLayer.pipe(
+      Layer.provide(Layer.mergeAll(socketLayer, RpcSerialization.layerJson, connectionHooksLayer)),
+    ),
+    requestHooksLayer,
+    connectionHooksLayer,
+  );
+}
+
+interface ContextServiceLike {
+  readonly of: (value: unknown) => unknown;
+}
+
+interface RequestHookInfo {
+  readonly id: unknown;
+  readonly tag: string;
+  readonly stream: boolean;
+}
+
+function succeedDynamicService(service: ContextServiceLike, value: unknown): Layer.Layer<never> {
+  return (Layer.succeed as (tag: unknown, service: unknown) => Layer.Layer<never>)(service, value);
 }

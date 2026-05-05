@@ -21,6 +21,7 @@ const baseLocalStatus: VcsStatusLocalResult = {
 const baseRemoteStatus: VcsStatusRemoteResult = {
   hasUpstream: true,
   aheadCount: 0,
+  aheadOfDefaultCount: 0,
   behindCount: 0,
   pr: null,
 };
@@ -73,6 +74,7 @@ describe("ws rpc client", () => {
           ...baseLocalStatus,
           hasUpstream: false,
           aheadCount: 0,
+          aheadOfDefaultCount: 0,
           behindCount: 0,
           pr: null,
         },

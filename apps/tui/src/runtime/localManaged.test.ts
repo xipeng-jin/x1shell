@@ -87,6 +87,8 @@ describe("local managed supervisor", () => {
       noBrowser: true,
       autoBootstrapProjectFromCwd: true,
     });
+    expect(JSON.parse(envelope)).not.toHaveProperty("tailscaleServeEnabled");
+    expect(JSON.parse(envelope)).not.toHaveProperty("tailscaleServePort");
     expect(envelope).toContain("desktopBootstrapToken");
     const spawnCalls = spawnMock.mock.calls as unknown as Array<[string, string[]]>;
     const spawnArgs = spawnCalls[0]?.[1];
