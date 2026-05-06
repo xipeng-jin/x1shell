@@ -419,6 +419,12 @@ export const ProviderRegistryLive = Layer.effect(
       },
     );
 
+    const recordProviderMaintenanceVerifiedSnapshots = Effect.fn(
+      "recordProviderMaintenanceVerifiedSnapshots",
+    )(function* (providers: ReadonlyArray<ServerProvider>) {
+      return yield* upsertProviders(providers);
+    });
+
     const refreshOneSource = Effect.fn("refreshOneSource")(function* (
       providerSource: ProviderSnapshotSource,
     ) {
@@ -679,6 +685,7 @@ export const ProviderRegistryLive = Layer.effect(
         refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
       getProviderMaintenanceCapabilitiesForInstance,
       setProviderMaintenanceActionState,
+      recordProviderMaintenanceVerifiedSnapshots,
       get streamChanges() {
         return Stream.fromPubSub(changesPubSub);
       },

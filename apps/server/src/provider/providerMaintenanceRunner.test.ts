@@ -185,6 +185,16 @@ function makeRegistry(
       getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
         Effect.succeed(lifecycleFor(provider)),
       setProviderMaintenanceActionState,
+      recordProviderMaintenanceVerifiedSnapshots: (providers) =>
+        Ref.updateAndGet(providersRef, (previousProviders) => {
+          const nextByInstanceId = new Map(
+            providers.map((provider) => [provider.instanceId, provider] as const),
+          );
+          return previousProviders.map((previousProvider) => {
+            const nextProvider = nextByInstanceId.get(previousProvider.instanceId);
+            return nextProvider ? { ...previousProvider, ...nextProvider } : previousProvider;
+          });
+        }),
       streamChanges: Stream.empty,
     };
 
@@ -231,6 +241,45 @@ describe("providerMaintenanceRunner", () => {
             calls.push({ command, args });
             return { stdout: "updated" };
           }),
+        ),
+      ),
+    );
+  });
+
+  it.effect("publishes the verified advisory after a successful update", () => {
+    const staleBehindLatestProvider: ServerProvider = {
+      ...baseProvider,
+      version: "1.0.0",
+      versionAdvisory: {
+        status: "behind_latest",
+        currentVersion: "1.0.0",
+        latestVersion: "9.9.9",
+        updateCommand: "npm install -g @openai/codex@latest",
+        canUpdate: true,
+        checkedAt: "2026-04-30T12:00:00.000Z",
+        message: "Update available.",
+      },
+    };
+
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(staleBehindLatestProvider);
+      const updater = yield* makeTestRunner(registry);
+
+      const result = yield* updater.updateProvider(CODEX_DRIVER);
+      const resultProvider = result.providers[0];
+      const registryProvider = (yield* registry.getProviders)[0];
+
+      assert.strictEqual(resultProvider?.updateState?.status, "succeeded");
+      assert.strictEqual(resultProvider?.versionAdvisory?.status, "current");
+      assert.strictEqual(resultProvider?.versionAdvisory?.latestVersion, "1.0.0");
+      assert.strictEqual(registryProvider?.updateState?.status, "succeeded");
+      assert.strictEqual(registryProvider?.versionAdvisory?.status, "current");
+      assert.strictEqual(registryProvider?.versionAdvisory?.latestVersion, "1.0.0");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          latestVersionHttpClient("1.0.0"),
+          mockSpawnerLayer(() => ({ stdout: "updated" })),
         ),
       ),
     );

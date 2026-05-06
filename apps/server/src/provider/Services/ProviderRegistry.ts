@@ -69,6 +69,15 @@ export interface ProviderRegistryShape {
   }) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   /**
+   * Record provider snapshots verified by maintenance actions after an
+   * external command changes provider state. The registry still owns merge,
+   * persistence, publication, and volatile action-state projection.
+   */
+  readonly recordProviderMaintenanceVerifiedSnapshots: (
+    providers: ReadonlyArray<ServerProvider>,
+  ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+
+  /**
    * Stream of provider snapshot updates — one emission per aggregated
    * change. The array contains the full current state.
    */
