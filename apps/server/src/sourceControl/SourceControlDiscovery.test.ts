@@ -48,6 +48,15 @@ const processOutput = (
   stderrTruncated: false,
 });
 
+function processSpawnFailure(input: VcsProcess.VcsProcessInput): VcsProcessSpawnError {
+  return new VcsProcessSpawnError({
+    operation: input.operation,
+    command: input.command,
+    cwd: input.cwd,
+    cause: new Error(`${input.command} not found`),
+  });
+}
+
 it.effect("reports implemented tools separately from locally available executables", () => {
   const processMock = {
     run: (input: VcsProcess.VcsProcessInput) => {
@@ -68,14 +77,7 @@ Logged in to github.com account juliusmarminge (keyring)
 `),
         );
       }
-      return Effect.fail(
-        new VcsProcessSpawnError({
-          operation: input.operation,
-          command: input.command,
-          cwd: input.cwd,
-          cause: new Error(`${input.command} not found`),
-        }),
-      );
+      return Effect.fail(processSpawnFailure(input));
     },
   } satisfies Partial<VcsProcess.VcsProcessShape>;
   const testLayer = SourceControlDiscovery.layer.pipe(
@@ -162,6 +164,12 @@ it.effect("probes provider authentication without exposing token details", () =>
       if (input.args[0] === "--version") {
         return Effect.succeed(processOutput(`${input.command} version test\n`));
       }
+      if (input.command === "az" && input.args.join(" ") === "extension show --name azure-devops") {
+        return Effect.succeed(processOutput('{"name":"azure-devops"}\n'));
+      }
+      if (input.command === "az" && input.args.join(" ") === "repos --help") {
+        return Effect.succeed(processOutput("Group\n    az repos\n"));
+      }
       if (input.command === "gh" && input.args.join(" ") === "auth status") {
         return Effect.succeed(
           processOutput(`github.com
@@ -184,14 +192,7 @@ Logged in to gitlab.com as gitlab-user
       ) {
         return Effect.succeed(processOutput("azure-user@example.com\n"));
       }
-      return Effect.fail(
-        new VcsProcessSpawnError({
-          operation: input.operation,
-          command: input.command,
-          cwd: input.cwd,
-          cause: new Error(`${input.command} not found`),
-        }),
-      );
+      return Effect.fail(processSpawnFailure(input));
     },
   } satisfies Partial<VcsProcess.VcsProcessShape>;
   const testLayer = SourceControlDiscovery.layer.pipe(
@@ -252,6 +253,123 @@ Logged in to gitlab.com as gitlab-user
           detail: Option.none(),
         },
       ],
+    );
+  }).pipe(Effect.provide(testLayer));
+});
+
+it.effect("does not enable Azure DevOps when the Azure DevOps extension is missing", () => {
+  const processMock = {
+    run: (input: VcsProcess.VcsProcessInput) => {
+      if (input.command === "az" && input.args[0] === "--version") {
+        return Effect.succeed(processOutput("azure-cli 2.74.0\n"));
+      }
+      if (input.command === "az" && input.args.join(" ") === "extension show --name azure-devops") {
+        return Effect.fail(processSpawnFailure(input));
+      }
+      if (
+        input.command === "az" &&
+        input.args.join(" ") === "account show --query user.name -o tsv"
+      ) {
+        return Effect.succeed(processOutput("azure-user@example.com\n"));
+      }
+      return Effect.fail(processSpawnFailure(input));
+    },
+  } satisfies Partial<VcsProcess.VcsProcessShape>;
+  const testLayer = SourceControlDiscovery.layer.pipe(
+    Layer.provide(
+      ServerConfig.layerTest(process.cwd(), {
+        prefix: "t3-source-control-azure-extension-discovery-",
+      }),
+    ),
+    Layer.provide(Layer.mock(VcsProcess.VcsProcess)(processMock)),
+    Layer.provide(
+      sourceControlProviderRegistryTestLayer({
+        process: processMock,
+        bitbucket: {
+          probeAuth: Effect.succeed({
+            status: "unauthenticated",
+            account: Option.none(),
+            host: Option.some("bitbucket.org"),
+            detail: Option.none(),
+          }),
+        },
+      }),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+  );
+
+  return Effect.gen(function* () {
+    const discovery = yield* SourceControlDiscovery.SourceControlDiscovery;
+    const result = yield* discovery.discover;
+    const azure = result.sourceControlProviders.find((item) => item.kind === "azure-devops");
+
+    assert.ok(azure);
+    assert.strictEqual(azure.status, "missing");
+    assert.strictEqual(azure.auth.status, "unknown");
+    assert.deepStrictEqual(
+      azure.detail,
+      Option.some(
+        "Azure DevOps CLI extension is not installed. Run `az extension add --name azure-devops` and retry.",
+      ),
+    );
+  }).pipe(Effect.provide(testLayer));
+});
+
+it.effect("does not enable Azure DevOps when Azure Repos commands are unavailable", () => {
+  const processMock = {
+    run: (input: VcsProcess.VcsProcessInput) => {
+      if (input.command === "az" && input.args[0] === "--version") {
+        return Effect.succeed(processOutput("azure-cli 2.74.0\n"));
+      }
+      if (input.command === "az" && input.args.join(" ") === "extension show --name azure-devops") {
+        return Effect.succeed(processOutput('{"name":"azure-devops"}\n'));
+      }
+      if (input.command === "az" && input.args.join(" ") === "repos --help") {
+        return Effect.fail(processSpawnFailure(input));
+      }
+      if (
+        input.command === "az" &&
+        input.args.join(" ") === "account show --query user.name -o tsv"
+      ) {
+        return Effect.succeed(processOutput("azure-user@example.com\n"));
+      }
+      return Effect.fail(processSpawnFailure(input));
+    },
+  } satisfies Partial<VcsProcess.VcsProcessShape>;
+  const testLayer = SourceControlDiscovery.layer.pipe(
+    Layer.provide(
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3-source-control-azure-repos-discovery-" }),
+    ),
+    Layer.provide(Layer.mock(VcsProcess.VcsProcess)(processMock)),
+    Layer.provide(
+      sourceControlProviderRegistryTestLayer({
+        process: processMock,
+        bitbucket: {
+          probeAuth: Effect.succeed({
+            status: "unauthenticated",
+            account: Option.none(),
+            host: Option.some("bitbucket.org"),
+            detail: Option.none(),
+          }),
+        },
+      }),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+  );
+
+  return Effect.gen(function* () {
+    const discovery = yield* SourceControlDiscovery.SourceControlDiscovery;
+    const result = yield* discovery.discover;
+    const azure = result.sourceControlProviders.find((item) => item.kind === "azure-devops");
+
+    assert.ok(azure);
+    assert.strictEqual(azure.status, "missing");
+    assert.strictEqual(azure.auth.status, "unknown");
+    assert.deepStrictEqual(
+      azure.detail,
+      Option.some(
+        "Azure DevOps Repos commands are unavailable. Install or update the `azure-devops` Azure CLI extension.",
+      ),
     );
   }).pipe(Effect.provide(testLayer));
 });

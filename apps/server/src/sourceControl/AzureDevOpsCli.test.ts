@@ -172,6 +172,74 @@ describe("AzureDevOpsCli.layer", () => {
         url: "https://dev.azure.com/acme/project/_git/repo",
         sshUrl: "git@ssh.dev.azure.com:v3/acme/project/repo",
       });
+      expect(mockRun).toHaveBeenCalledWith({
+        operation: "AzureDevOpsCli.execute",
+        command: "az",
+        args: [
+          "repos",
+          "show",
+          "--detect",
+          "true",
+          "--repository",
+          "repo",
+          "--only-show-errors",
+          "--output",
+          "json",
+        ],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("reads project-qualified Azure repository clone URLs", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(
+        Effect.succeed(
+          processOutput(
+            JSON.stringify({
+              name: "repo",
+              webUrl: "https://dev.azure.com/acme/project/_git/repo",
+              remoteUrl: "https://dev.azure.com/acme/project/_git/repo",
+              sshUrl: "git@ssh.dev.azure.com:v3/acme/project/repo",
+              project: {
+                name: "project",
+              },
+            }),
+          ),
+        ),
+      );
+
+      const az = yield* AzureDevOpsCli.AzureDevOpsCli;
+      const result = yield* az.getRepositoryCloneUrls({
+        cwd: "/repo",
+        repository: "project/repo",
+      });
+
+      assert.deepStrictEqual(result, {
+        nameWithOwner: "project/repo",
+        url: "https://dev.azure.com/acme/project/_git/repo",
+        sshUrl: "git@ssh.dev.azure.com:v3/acme/project/repo",
+      });
+      expect(mockRun).toHaveBeenCalledWith({
+        operation: "AzureDevOpsCli.execute",
+        command: "az",
+        args: [
+          "repos",
+          "show",
+          "--detect",
+          "true",
+          "--repository",
+          "repo",
+          "--project",
+          "project",
+          "--only-show-errors",
+          "--output",
+          "json",
+        ],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+      });
     }).pipe(Effect.provide(layer)),
   );
 

@@ -23,6 +23,10 @@ export type SourceControlCliDiscoverySpec = SourceControlDiscoverySpecBase & {
   readonly type: "cli";
   readonly executable: string;
   readonly versionArgs: ReadonlyArray<string>;
+  readonly capabilityChecks?: ReadonlyArray<{
+    readonly args: ReadonlyArray<string>;
+    readonly failureDetail: string;
+  }>;
   readonly authArgs: ReadonlyArray<string>;
   readonly parseAuth: (input: SourceControlAuthProbeInput) => SourceControlProviderAuth;
 };
@@ -192,6 +196,7 @@ export function probeSourceControlProvider(input: {
   }
 
   const spec = input.spec;
+  const capabilityChecks = spec.capabilityChecks ?? [];
 
   return probeCli({
     spec,
@@ -206,7 +211,24 @@ export function probeSourceControlProvider(input: {
         } satisfies SourceControlProviderDiscoveryItem);
       }
 
-      return input.process
+      const runCapabilityChecks = Effect.forEach(
+        capabilityChecks,
+        (check) =>
+          input.process
+            .run({
+              operation: "source-control.discovery.capability",
+              command: spec.executable,
+              args: check.args,
+              cwd: input.cwd,
+              timeoutMs: 5_000,
+              maxOutputBytes: 8_000,
+              truncateOutputAtMaxBytes: true,
+            })
+            .pipe(Effect.mapError(() => check.failureDetail)),
+        { discard: true },
+      );
+
+      const auth = input.process
         .run({
           operation: "source-control.discovery.auth",
           command: spec.executable,
@@ -232,6 +254,18 @@ export function probeSourceControlProvider(input: {
             } satisfies SourceControlProviderDiscoveryItem),
           ),
         );
+
+      return runCapabilityChecks.pipe(
+        Effect.flatMap(() => auth),
+        Effect.catch((failureDetail) =>
+          Effect.succeed({
+            ...item,
+            status: "missing" as const,
+            detail: Option.some(failureDetail),
+            auth: unknownAuth(failureDetail),
+          } satisfies SourceControlProviderDiscoveryItem),
+        ),
+      );
     }),
   );
 }

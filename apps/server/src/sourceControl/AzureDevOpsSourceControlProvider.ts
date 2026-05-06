@@ -51,6 +51,18 @@ export const discovery = {
   label: "Azure DevOps",
   executable: "az",
   versionArgs: ["--version"],
+  capabilityChecks: [
+    {
+      args: ["extension", "show", "--name", "azure-devops"],
+      failureDetail:
+        "Azure DevOps CLI extension is not installed. Run `az extension add --name azure-devops` and retry.",
+    },
+    {
+      args: ["repos", "--help"],
+      failureDetail:
+        "Azure DevOps Repos commands are unavailable. Install or update the `azure-devops` Azure CLI extension.",
+    },
+  ],
   authArgs: ["account", "show", "--query", "user.name", "-o", "tsv"],
   parseAuth: parseAzureAuth,
   installHint:
