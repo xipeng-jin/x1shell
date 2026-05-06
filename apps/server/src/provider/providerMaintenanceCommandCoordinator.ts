@@ -1,5 +1,6 @@
-import { Effect, Ref } from "effect";
+import { Context, Effect, Layer, Ref } from "effect";
 import * as Semaphore from "effect/Semaphore";
+import { ProviderDriverKind, ServerProviderUpdateError } from "@t3tools/contracts";
 
 export interface ProviderMaintenanceCommandCoordinatorShape<E> {
   readonly withCommandLock: <A, R>(input: {
@@ -77,3 +78,23 @@ export const makeProviderMaintenanceCommandCoordinator = Effect.fn(
     withCommandLock,
   } satisfies ProviderMaintenanceCommandCoordinatorShape<E>;
 });
+
+export class ProviderMaintenanceCommandCoordinator extends Context.Service<
+  ProviderMaintenanceCommandCoordinator,
+  ProviderMaintenanceCommandCoordinatorShape<ServerProviderUpdateError>
+>()("t3/provider/ProviderMaintenanceCommandCoordinator") {}
+
+const liveProviderMaintenanceCommandCoordinator = Effect.runSync(
+  makeProviderMaintenanceCommandCoordinator({
+    makeAlreadyRunningError: () =>
+      new ServerProviderUpdateError({
+        provider: ProviderDriverKind.make("unknown"),
+        reason: "An update is already running for this provider.",
+      }),
+  }),
+);
+
+export const layer = Layer.succeed(
+  ProviderMaintenanceCommandCoordinator,
+  liveProviderMaintenanceCommandCoordinator,
+);

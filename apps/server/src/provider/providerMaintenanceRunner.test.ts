@@ -473,6 +473,53 @@ describe("providerMaintenanceRunner", () => {
     );
   });
 
+  it.effect("shares provider update locks across runner instances", () => {
+    const startedLatch: { resolve: () => void } = { resolve: () => {} };
+    const releaseLatch: { resolve: () => void } = { resolve: () => {} };
+    const started = new Promise<void>((resolve) => {
+      startedLatch.resolve = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseLatch.resolve = resolve;
+    });
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry();
+      const firstRunner = yield* makeTestRunner(registry);
+      const secondRunner = yield* makeTestRunner(registry);
+
+      const first = yield* firstRunner.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
+      yield* Effect.promise(() => started);
+
+      const second = yield* secondRunner.updateProvider(CODEX_DRIVER).pipe(Effect.exit);
+      assert.strictEqual(Exit.isFailure(second), true);
+      if (Exit.isFailure(second)) {
+        const error = Cause.squash(second.cause);
+        assert.strictEqual(Schema.is(ServerProviderUpdateError)(error), true);
+        if (Schema.is(ServerProviderUpdateError)(error)) {
+          assert.include(error.reason, "already running");
+        }
+      }
+
+      releaseLatch.resolve();
+      yield* Fiber.join(first);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          latestVersionHttpClient("0.0.0"),
+          mockSpawnerLayer(() => {
+            startedLatch.resolve();
+            return {
+              stdout: "updated",
+              exitCode: Effect.promise(() => release).pipe(
+                Effect.as(ChildProcessSpawner.ExitCode(0)),
+              ),
+            };
+          }),
+        ),
+      ),
+    );
+  });
+
   it.effect("serializes different providers that share the same update lock key", () => {
     const firstStartedLatch: { resolve: () => void } = { resolve: () => {} };
     const releaseFirstLatch: { resolve: () => void } = { resolve: () => {} };

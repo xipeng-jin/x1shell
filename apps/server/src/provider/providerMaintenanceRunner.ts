@@ -12,7 +12,10 @@ import { HttpClient } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { ProviderRegistry } from "./Services/ProviderRegistry.ts";
-import { makeProviderMaintenanceCommandCoordinator } from "./providerMaintenanceCommandCoordinator.ts";
+import {
+  ProviderMaintenanceCommandCoordinator,
+  layer as ProviderMaintenanceCommandCoordinatorLayer,
+} from "./providerMaintenanceCommandCoordinator.ts";
 import { enrichProviderSnapshotWithVersionAdvisory } from "./providerMaintenance.ts";
 import type { ProviderMaintenanceCapabilities } from "./providerMaintenance.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
@@ -173,19 +176,13 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
   const providerRegistry = yield* ProviderRegistry;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
+  const commandCoordinator = yield* ProviderMaintenanceCommandCoordinator;
   const runMaintenanceCommand = (command: string, args: ReadonlyArray<string>) =>
     runProviderMaintenanceCommandWithSpawner({
       spawner,
       command,
       args,
     });
-  const commandCoordinator = yield* makeProviderMaintenanceCommandCoordinator({
-    makeAlreadyRunningError: () =>
-      new ServerProviderUpdateError({
-        provider: ProviderDriverKind.make("unknown"),
-        reason: "An update is already running for this provider.",
-      }),
-  });
 
   const verifyRefreshedProvider = (
     provider: ProviderDriverKind,
@@ -392,4 +389,6 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
   });
 });
 
-export const layer = Layer.effect(ProviderMaintenanceRunner, make());
+export const layer = Layer.effect(ProviderMaintenanceRunner, make()).pipe(
+  Layer.provideMerge(ProviderMaintenanceCommandCoordinatorLayer),
+);

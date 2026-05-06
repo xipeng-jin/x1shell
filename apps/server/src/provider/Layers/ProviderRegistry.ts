@@ -470,7 +470,7 @@ export const ProviderRegistryLive = Layer.effect(
       "getProviderMaintenanceCapabilitiesForInstance",
     )(function* (instanceId: ProviderInstanceId, provider: ProviderDriverKind) {
       const instance = Array.from((yield* Ref.get(liveSubsRef)).values()).find(
-        (candidate) => candidate.instanceId === instanceId,
+        (candidate) => candidate.instanceId === instanceId && candidate.driverKind === provider,
       );
       return (
         instance?.snapshot.maintenanceCapabilities ??
