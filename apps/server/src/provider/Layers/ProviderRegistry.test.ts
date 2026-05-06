@@ -770,6 +770,103 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
         }),
       );
 
+      it.effect("does not persist volatile provider update state during refresh", () =>
+        Effect.gen(function* () {
+          const cursorDriver = ProviderDriverKind.make("cursor");
+          const cursorInstanceId = ProviderInstanceId.make("cursor");
+          const initialProvider = {
+            instanceId: cursorInstanceId,
+            driver: cursorDriver,
+            status: "ready",
+            enabled: true,
+            installed: true,
+            auth: { status: "authenticated" },
+            checkedAt: "2026-04-14T00:00:00.000Z",
+            version: "2026.04.09-f2b0fcd",
+            models: [],
+            slashCommands: [],
+            skills: [],
+          } as const satisfies ServerProvider;
+          const refreshedProvider = {
+            ...initialProvider,
+            checkedAt: "2026-04-14T00:01:00.000Z",
+          } satisfies ServerProvider;
+          const instance = {
+            instanceId: cursorInstanceId,
+            driverKind: cursorDriver,
+            continuationIdentity: {
+              driverKind: cursorDriver,
+              continuationKey: "cursor:instance:cursor",
+            },
+            displayName: undefined,
+            enabled: true,
+            snapshot: {
+              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
+                provider: cursorDriver,
+                packageName: null,
+              }),
+              getSnapshot: Effect.succeed(initialProvider),
+              refresh: Effect.succeed(refreshedProvider),
+              streamChanges: Stream.empty,
+            },
+            adapter: {} as ProviderInstance["adapter"],
+            textGeneration: {} as ProviderInstance["textGeneration"],
+          } satisfies ProviderInstance;
+          const instanceRegistryLayer = Layer.succeed(ProviderInstanceRegistry, {
+            getInstance: (instanceId) =>
+              Effect.succeed(instanceId === cursorInstanceId ? instance : undefined),
+            listInstances: Effect.succeed([instance]),
+            listUnavailable: Effect.succeed([]),
+            streamChanges: Stream.empty,
+            subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), (pubsub) =>
+              PubSub.subscribe(pubsub),
+            ),
+          });
+          const scope = yield* Scope.make();
+          yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+          const runtimeServices = yield* Layer.build(
+            ProviderRegistryLive.pipe(
+              Layer.provideMerge(instanceRegistryLayer),
+              Layer.provideMerge(
+                ServerConfig.layerTest(process.cwd(), {
+                  prefix: "t3-provider-registry-update-state-persist-",
+                }),
+              ),
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ).pipe(Scope.provide(scope));
+
+          yield* Effect.gen(function* () {
+            const registry = yield* ProviderRegistry;
+            const config = yield* ServerConfig;
+            const filePath = yield* resolveProviderStatusCachePath({
+              cacheDir: config.providerStatusCacheDir,
+              instanceId: cursorInstanceId,
+            });
+
+            yield* registry.setProviderMaintenanceActionState({
+              instanceId: cursorInstanceId,
+              action: "update",
+              state: {
+                status: "running",
+                startedAt: "2026-04-14T00:00:30.000Z",
+                finishedAt: null,
+                message: "Updating provider.",
+                output: null,
+              },
+            });
+            yield* registry.refreshInstance(cursorInstanceId);
+
+            const liveProvider = (yield* registry.getProviders)[0];
+            assert.strictEqual(liveProvider?.updateState?.status, "running");
+
+            const cachedProvider = yield* readProviderStatusCache(filePath);
+            assert.strictEqual(cachedProvider?.checkedAt, refreshedProvider.checkedAt);
+            assert.strictEqual(cachedProvider?.updateState, undefined);
+          }).pipe(Effect.provide(runtimeServices));
+        }),
+      );
+
       it.effect("returns the cached provider list when a manual refresh fails", () =>
         Effect.gen(function* () {
           const codexDriver = ProviderDriverKind.make("codex");

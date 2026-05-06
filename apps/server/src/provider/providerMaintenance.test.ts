@@ -249,6 +249,7 @@ describe("providerMaintenance", () => {
         binaryPath: "/opt/homebrew/bin/package-tool",
         platform: "darwin",
         env,
+        realCommandPath: "/opt/homebrew/Cellar/package-tool/1.2.3/bin/package-tool",
       }),
     ).toEqual({
       provider: driver("packageTool"),
@@ -261,6 +262,50 @@ describe("providerMaintenance", () => {
         args: ["upgrade", "package-tool"],
 
         lockKey: "homebrew",
+        env,
+      },
+    });
+  });
+
+  it("does not treat /usr/local/bin package-managed shims as Homebrew", () => {
+    const env = {
+      PATH: "",
+    };
+    expect(
+      packageToolUpdate.resolve({
+        binaryPath: "/usr/local/bin/package-tool",
+        platform: "darwin",
+        env,
+      }),
+    ).toEqual({
+      provider: driver("packageTool"),
+      packageName: "@example/package-tool",
+      update: null,
+    });
+  });
+
+  it("keeps npm updates for package-managed shims in /usr/local/bin with npm real paths", () => {
+    const env = {
+      PATH: "",
+    };
+    expect(
+      packageToolUpdate.resolve({
+        binaryPath: "/usr/local/bin/package-tool",
+        platform: "darwin",
+        env,
+        realCommandPath: "/usr/local/lib/node_modules/@example/package-tool/bin/package-tool.js",
+      }),
+    ).toEqual({
+      provider: driver("packageTool"),
+      packageName: "@example/package-tool",
+      update: {
+        command: "npm install -g @example/package-tool@latest",
+
+        executable: "npm",
+
+        args: ["install", "-g", "@example/package-tool@latest"],
+
+        lockKey: "npm-global",
         env,
       },
     });
@@ -349,6 +394,7 @@ describe("providerMaintenance", () => {
         binaryPath: "/opt/homebrew/bin/native-package-tool",
         platform: "darwin",
         env,
+        realCommandPath: "/opt/homebrew/Cellar/native-package-tool/1.2.3/bin/native-package-tool",
       }),
     ).toEqual({
       provider: driver("nativePackageTool"),
@@ -375,6 +421,7 @@ describe("providerMaintenance", () => {
         binaryPath: "/opt/homebrew/bin/scoped-package-tool",
         platform: "darwin",
         env,
+        realCommandPath: "/opt/homebrew/Cellar/scoped-package-tool/1.2.3/bin/scoped-package-tool",
       }),
     ).toEqual({
       provider: driver("scopedPackageTool"),

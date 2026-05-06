@@ -41,6 +41,7 @@ import {
   orderProviderSnapshots,
   readProviderStatusCache,
   resolveProviderStatusCachePath,
+  stripVolatileProviderStatus,
   writeProviderStatusCache,
 } from "../providerStatusCache.ts";
 import type { ProviderInstance } from "../ProviderDriver.ts";
@@ -349,9 +350,9 @@ export const ProviderRegistryLive = Layer.effect(
           }
 
           const providers = orderProviderSnapshots([...mergedProviders.values()]);
-          const providersToPersist = providers.filter((provider) =>
-            updatedKeys.has(snapshotInstanceKey(provider)),
-          );
+          const providersToPersist = providers
+            .filter((provider) => updatedKeys.has(snapshotInstanceKey(provider)))
+            .map(stripVolatileProviderStatus);
           return [[previousProviders, providers, providersToPersist] as const, providers];
         },
       );
