@@ -6,9 +6,17 @@
  *
  * @module ProviderRegistry
  */
-import type { ProviderInstanceId, ProviderDriverKind, ServerProvider } from "@t3tools/contracts";
+import type {
+  ProviderInstanceId,
+  ProviderDriverKind,
+  ServerProvider,
+  ServerProviderUpdateState,
+} from "@t3tools/contracts";
 import { Context } from "effect";
 import type { Effect, Stream } from "effect";
+import type { ProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
+
+export type ProviderMaintenanceActionKind = "update";
 
 export interface ProviderRegistryShape {
   /**
@@ -37,6 +45,36 @@ export interface ProviderRegistryShape {
    */
   readonly refreshInstance: (
     instanceId: ProviderInstanceId,
+  ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+
+  /**
+   * Resolve the maintenance capabilities owned by one live provider instance.
+   * Falls back to manual-only capabilities when the instance is not live.
+   */
+  readonly getProviderMaintenanceCapabilitiesForInstance: (
+    instanceId: ProviderInstanceId,
+    provider: ProviderDriverKind,
+  ) => Effect.Effect<ProviderMaintenanceCapabilities>;
+
+  /**
+   * Apply volatile maintenance-action state to one configured instance.
+   * This state is never persisted to disk. Today only update actions are
+   * projected onto `ServerProvider.updateState`; install/auth actions can
+   * extend this action map without adding driver-scoped APIs.
+   */
+  readonly setProviderMaintenanceActionState: (input: {
+    readonly instanceId: ProviderInstanceId;
+    readonly action: ProviderMaintenanceActionKind;
+    readonly state: ServerProviderUpdateState | null;
+  }) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+
+  /**
+   * Record provider snapshots verified by maintenance actions after an
+   * external command changes provider state. The registry still owns merge,
+   * persistence, publication, and volatile action-state projection.
+   */
+  readonly recordProviderMaintenanceVerifiedSnapshots: (
+    providers: ReadonlyArray<ServerProvider>,
   ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   /**

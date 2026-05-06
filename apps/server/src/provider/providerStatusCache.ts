@@ -137,11 +137,18 @@ export const readProviderStatusCache = (filePath: string) =>
     );
   });
 
+export function stripVolatileProviderStatus(provider: ServerProvider): ServerProvider {
+  const { updateState: _updateState, ...cacheableProvider } = provider;
+  return cacheableProvider;
+}
+
 export const writeProviderStatusCache = (input: {
   readonly filePath: string;
   readonly provider: ServerProvider;
-}) =>
-  writeFileStringAtomically({
+}) => {
+  const cacheableProvider = stripVolatileProviderStatus(input.provider);
+  return writeFileStringAtomically({
     filePath: input.filePath,
-    contents: `${JSON.stringify(input.provider, null, 2)}\n`,
+    contents: `${JSON.stringify(cacheableProvider, null, 2)}\n`,
   });
+};
