@@ -348,7 +348,7 @@ interface PublishRepositoryDialogProps {
 function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const sourceControlDiscovery = useSourceControlDiscovery();
+  const sourceControlDiscovery = useSourceControlDiscovery({ environmentId: props.environmentId });
   const [publishProvider, setPublishProvider] = useState<PublishProviderKind>("github");
   const [publishRepository, setPublishRepository] = useState("");
   const [publishVisibility, setPublishVisibility] =
