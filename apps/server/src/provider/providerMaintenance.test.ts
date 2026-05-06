@@ -140,14 +140,15 @@ describe("providerMaintenance", () => {
         const packageToolPath = path.join(vitePlusBinDir, "package-tool");
         writeFileSync(packageToolPath, "#!/bin/sh\n");
         chmodSync(packageToolPath, 0o755);
+        const env = {
+          PATH: vitePlusBinDir,
+        };
 
         expect(
           packageToolUpdate.resolve({
             binaryPath: "package-tool",
             platform: "darwin",
-            env: {
-              PATH: vitePlusBinDir,
-            },
+            env,
           }),
         ).toEqual({
           provider: driver("packageTool"),
@@ -160,6 +161,7 @@ describe("providerMaintenance", () => {
             args: ["i", "-g", "@example/package-tool"],
 
             lockKey: "vite-plus-global",
+            env,
           },
         });
       }),
@@ -173,15 +175,16 @@ describe("providerMaintenance", () => {
         const bunBinDir = path.join(tempDir, ".bun", "bin");
         mkdirSync(bunBinDir, { recursive: true });
         writeFileSync(path.join(bunBinDir, "native-package-tool.exe"), "MZ");
+        const env = {
+          PATH: bunBinDir,
+          PATHEXT: ".COM;.EXE;.BAT;.CMD",
+        };
 
         expect(
           nativePackageToolUpdate.resolve({
             binaryPath: "native-package-tool",
             platform: "win32",
-            env: {
-              PATH: bunBinDir,
-              PATHEXT: ".COM;.EXE;.BAT;.CMD",
-            },
+            env,
           }),
         ).toEqual({
           provider: driver("nativePackageTool"),
@@ -194,6 +197,7 @@ describe("providerMaintenance", () => {
             args: ["i", "-g", "@example/native-package-tool@latest"],
 
             lockKey: "bun-global",
+            env,
           },
         });
       }),
@@ -209,14 +213,15 @@ describe("providerMaintenance", () => {
         const scopedPackageToolPath = path.join(pnpmHomeDir, "scoped-package-tool");
         writeFileSync(scopedPackageToolPath, "#!/bin/sh\n");
         chmodSync(scopedPackageToolPath, 0o755);
+        const env = {
+          PATH: pnpmHomeDir,
+        };
 
         expect(
           scopedPackageToolUpdate.resolve({
             binaryPath: "scoped-package-tool",
             platform: "darwin",
-            env: {
-              PATH: pnpmHomeDir,
-            },
+            env,
           }),
         ).toEqual({
           provider: driver("scopedPackageTool"),
@@ -229,19 +234,21 @@ describe("providerMaintenance", () => {
             args: ["add", "-g", "@example/scoped-package-tool@latest"],
 
             lockKey: "pnpm-global",
+            env,
           },
         });
       }),
   );
 
   it("switches package-tool to Homebrew updates when the binary resolves through Homebrew", () => {
+    const env = {
+      PATH: "",
+    };
     expect(
       packageToolUpdate.resolve({
         binaryPath: "/opt/homebrew/bin/package-tool",
         platform: "darwin",
-        env: {
-          PATH: "",
-        },
+        env,
       }),
     ).toEqual({
       provider: driver("packageTool"),
@@ -254,6 +261,7 @@ describe("providerMaintenance", () => {
         args: ["upgrade", "package-tool"],
 
         lockKey: "homebrew",
+        env,
       },
     });
   });
@@ -268,14 +276,15 @@ describe("providerMaintenance", () => {
         const nativePackageToolPath = path.join(nativeBinDir, "native-package-tool");
         writeFileSync(nativePackageToolPath, "#!/bin/sh\n");
         chmodSync(nativePackageToolPath, 0o755);
+        const env = {
+          PATH: nativeBinDir,
+        };
 
         expect(
           nativePackageToolUpdate.resolve({
             binaryPath: "native-package-tool",
             platform: "darwin",
-            env: {
-              PATH: nativeBinDir,
-            },
+            env,
           }),
         ).toEqual({
           provider: driver("nativePackageTool"),
@@ -288,6 +297,7 @@ describe("providerMaintenance", () => {
             args: ["update"],
 
             lockKey: "native-package-tool-native",
+            env,
           },
         });
       }),
@@ -303,14 +313,15 @@ describe("providerMaintenance", () => {
         const scopedPackageToolPath = path.join(nativeBinDir, "scoped-package-tool");
         writeFileSync(scopedPackageToolPath, "#!/bin/sh\n");
         chmodSync(scopedPackageToolPath, 0o755);
+        const env = {
+          PATH: nativeBinDir,
+        };
 
         expect(
           scopedPackageToolUpdate.resolve({
             binaryPath: "scoped-package-tool",
             platform: "darwin",
-            env: {
-              PATH: nativeBinDir,
-            },
+            env,
           }),
         ).toEqual({
           provider: driver("scopedPackageTool"),
@@ -323,19 +334,21 @@ describe("providerMaintenance", () => {
             args: ["upgrade"],
 
             lockKey: "scoped-package-tool-native",
+            env,
           },
         });
       }),
   );
 
   it("switches native-package-tool to Homebrew updates when the binary resolves through Homebrew", () => {
+    const env = {
+      PATH: "",
+    };
     expect(
       nativePackageToolUpdate.resolve({
         binaryPath: "/opt/homebrew/bin/native-package-tool",
         platform: "darwin",
-        env: {
-          PATH: "",
-        },
+        env,
       }),
     ).toEqual({
       provider: driver("nativePackageTool"),
@@ -348,18 +361,20 @@ describe("providerMaintenance", () => {
         args: ["upgrade", "native-package-tool"],
 
         lockKey: "homebrew",
+        env,
       },
     });
   });
 
   it("switches scoped-package-tool to Homebrew updates when the binary resolves through Homebrew", () => {
+    const env = {
+      PATH: "",
+    };
     expect(
       scopedPackageToolUpdate.resolve({
         binaryPath: "/opt/homebrew/bin/scoped-package-tool",
         platform: "darwin",
-        env: {
-          PATH: "",
-        },
+        env,
       }),
     ).toEqual({
       provider: driver("scopedPackageTool"),
@@ -372,6 +387,7 @@ describe("providerMaintenance", () => {
         args: ["upgrade", "example/tap/scoped-package-tool"],
 
         lockKey: "homebrew",
+        env,
       },
     });
   });
@@ -395,13 +411,14 @@ describe("providerMaintenance", () => {
       writeFileSync(packageBinPath, "#!/usr/bin/env node\n");
       chmodSync(packageBinPath, 0o755);
       symlinkSync(packageBinPath, symlinkPath);
+      const env = {
+        PATH: "",
+      };
 
       const capabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(packageToolUpdate, {
         binaryPath: symlinkPath,
         platform: "darwin",
-        env: {
-          PATH: "",
-        },
+        env,
       }).pipe(Effect.provide(NodeServices.layer));
 
       expect(capabilities).toEqual({
@@ -415,6 +432,7 @@ describe("providerMaintenance", () => {
           args: ["install", "-g", "@example/package-tool@latest"],
 
           lockKey: "npm-global",
+          env,
         },
       });
     }),
@@ -443,13 +461,14 @@ describe("providerMaintenance", () => {
       writeFileSync(packageBinPath, "#!/usr/bin/env node\n");
       chmodSync(packageBinPath, 0o755);
       symlinkSync(packageBinPath, symlinkPath);
+      const env = {
+        PATH: "",
+      };
 
       const capabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(packageToolUpdate, {
         binaryPath: symlinkPath,
         platform: "darwin",
-        env: {
-          PATH: "",
-        },
+        env,
       }).pipe(Effect.provide(NodeServices.layer));
 
       expect(capabilities).toEqual({
@@ -463,6 +482,7 @@ describe("providerMaintenance", () => {
           args: ["add", "-g", "@example/package-tool@latest"],
 
           lockKey: "pnpm-global",
+          env,
         },
       });
     }),

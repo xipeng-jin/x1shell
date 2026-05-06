@@ -24,6 +24,7 @@ export interface ProviderMaintenanceCommandAction {
   readonly executable: string;
   readonly args: ReadonlyArray<string>;
   readonly lockKey: string;
+  readonly env?: NodeJS.ProcessEnv;
 }
 
 export interface ProviderMaintenanceCapabilityResolutionOptions {
@@ -75,6 +76,7 @@ export function makeProviderMaintenanceCapabilities(input: {
   readonly updateExecutable: string | null;
   readonly updateArgs: ReadonlyArray<string>;
   readonly updateLockKey: string | null;
+  readonly updateEnv?: NodeJS.ProcessEnv;
 }): ProviderMaintenanceCapabilities {
   const update =
     input.updateExecutable === null || input.updateLockKey === null
@@ -84,6 +86,7 @@ export function makeProviderMaintenanceCapabilities(input: {
           executable: input.updateExecutable,
           args: input.updateArgs,
           lockKey: input.updateLockKey,
+          ...(input.updateEnv ? { env: { ...input.updateEnv } } : {}),
         };
   return {
     provider: input.provider,
@@ -107,6 +110,7 @@ export function makeManualOnlyProviderMaintenanceCapabilities(input: {
 
 function makeNpmGlobalProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
+  env?: NodeJS.ProcessEnv,
 ): ProviderMaintenanceCapabilities {
   return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
@@ -114,11 +118,13 @@ function makeNpmGlobalProviderMaintenanceCapabilities(
     updateExecutable: "npm",
     updateArgs: ["install", "-g", `${definition.npmPackageName}@latest`],
     updateLockKey: "npm-global",
+    ...(env ? { updateEnv: env } : {}),
   });
 }
 
 function makeBunGlobalProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
+  env?: NodeJS.ProcessEnv,
 ): ProviderMaintenanceCapabilities {
   return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
@@ -126,11 +132,13 @@ function makeBunGlobalProviderMaintenanceCapabilities(
     updateExecutable: "bun",
     updateArgs: ["i", "-g", `${definition.npmPackageName}@latest`],
     updateLockKey: "bun-global",
+    ...(env ? { updateEnv: env } : {}),
   });
 }
 
 function makePnpmGlobalProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
+  env?: NodeJS.ProcessEnv,
 ): ProviderMaintenanceCapabilities {
   return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
@@ -138,11 +146,13 @@ function makePnpmGlobalProviderMaintenanceCapabilities(
     updateExecutable: "pnpm",
     updateArgs: ["add", "-g", `${definition.npmPackageName}@latest`],
     updateLockKey: "pnpm-global",
+    ...(env ? { updateEnv: env } : {}),
   });
 }
 
 function makeVitePlusGlobalProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
+  env?: NodeJS.ProcessEnv,
 ): ProviderMaintenanceCapabilities {
   return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
@@ -150,11 +160,13 @@ function makeVitePlusGlobalProviderMaintenanceCapabilities(
     updateExecutable: "vp",
     updateArgs: ["i", "-g", definition.npmPackageName],
     updateLockKey: "vite-plus-global",
+    ...(env ? { updateEnv: env } : {}),
   });
 }
 
 function makeHomebrewProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
+  env?: NodeJS.ProcessEnv,
 ): ProviderMaintenanceCapabilities {
   if (!definition.homebrewFormula) {
     return makeManualOnlyProviderMaintenanceCapabilities({
@@ -169,11 +181,13 @@ function makeHomebrewProviderMaintenanceCapabilities(
     updateExecutable: "brew",
     updateArgs: ["upgrade", definition.homebrewFormula],
     updateLockKey: "homebrew",
+    ...(env ? { updateEnv: env } : {}),
   });
 }
 
 function makeNativeProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
+  env?: NodeJS.ProcessEnv,
 ): ProviderMaintenanceCapabilities | null {
   if (!definition.nativeUpdate) {
     return null;
@@ -185,6 +199,7 @@ function makeNativeProviderMaintenanceCapabilities(
     updateExecutable: definition.nativeUpdate.executable,
     updateArgs: definition.nativeUpdate.args,
     updateLockKey: definition.nativeUpdate.lockKey,
+    ...(env ? { updateEnv: env } : {}),
   });
 }
 
@@ -243,8 +258,9 @@ export function resolvePackageManagedProviderMaintenance(
   options?: ProviderMaintenanceCapabilityResolutionOptions,
 ): ProviderMaintenanceCapabilities {
   const binaryPath = nonEmptyString(options?.binaryPath);
+  const env = options?.env;
   if (!binaryPath) {
-    return makeNpmGlobalProviderMaintenanceCapabilities(definition);
+    return makeNpmGlobalProviderMaintenanceCapabilities(definition, env);
   }
 
   const resolvedCommandPath =
@@ -265,29 +281,29 @@ export function resolvePackageManagedProviderMaintenance(
       commandPaths.some((commandPath) => nativeUpdate.isCommandPath(commandPath))
     ) {
       return (
-        makeNativeProviderMaintenanceCapabilities(definition) ??
-        makeNpmGlobalProviderMaintenanceCapabilities(definition)
+        makeNativeProviderMaintenanceCapabilities(definition, env) ??
+        makeNpmGlobalProviderMaintenanceCapabilities(definition, env)
       );
     }
     if (commandPaths.some(isVitePlusGlobalCommandPath)) {
-      return makeVitePlusGlobalProviderMaintenanceCapabilities(definition);
+      return makeVitePlusGlobalProviderMaintenanceCapabilities(definition, env);
     }
     if (commandPaths.some(isBunGlobalCommandPath)) {
-      return makeBunGlobalProviderMaintenanceCapabilities(definition);
+      return makeBunGlobalProviderMaintenanceCapabilities(definition, env);
     }
     if (commandPaths.some(isPnpmGlobalCommandPath)) {
-      return makePnpmGlobalProviderMaintenanceCapabilities(definition);
+      return makePnpmGlobalProviderMaintenanceCapabilities(definition, env);
     }
     if (commandPaths.some(isNpmGlobalCommandPath)) {
-      return makeNpmGlobalProviderMaintenanceCapabilities(definition);
+      return makeNpmGlobalProviderMaintenanceCapabilities(definition, env);
     }
     if (commandPaths.some(isHomebrewCommandPath)) {
-      return makeHomebrewProviderMaintenanceCapabilities(definition);
+      return makeHomebrewProviderMaintenanceCapabilities(definition, env);
     }
   }
 
   if (!hasPathSeparator(binaryPath)) {
-    return makeNpmGlobalProviderMaintenanceCapabilities(definition);
+    return makeNpmGlobalProviderMaintenanceCapabilities(definition, env);
   }
 
   return makeManualOnlyProviderMaintenanceCapabilities({

@@ -116,6 +116,7 @@ function mockSpawnerLayer(
   handler: (
     command: string,
     args: ReadonlyArray<string>,
+    env: NodeJS.ProcessEnv | undefined,
   ) => {
     readonly stdout?: string;
     readonly stderr?: string;
@@ -129,8 +130,13 @@ function mockSpawnerLayer(
       const childProcess = command as unknown as {
         readonly command: string;
         readonly args: ReadonlyArray<string>;
+        readonly options?: {
+          readonly env?: NodeJS.ProcessEnv;
+        };
       };
-      return Effect.succeed(mockHandle(handler(childProcess.command, childProcess.args)));
+      return Effect.succeed(
+        mockHandle(handler(childProcess.command, childProcess.args, childProcess.options?.env)),
+      );
     }),
   );
 }
@@ -272,6 +278,54 @@ describe("providerMaintenanceRunner", () => {
           latestVersionHttpClient("0.0.0"),
           mockSpawnerLayer((command, args) => {
             calls.push({ command, args });
+            return { stdout: "updated" };
+          }),
+        ),
+      ),
+    );
+  });
+
+  it.effect("runs provider updates with the resolved provider environment", () => {
+    const providerEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATH: "/provider/bin",
+      X1_PROVIDER_TEST_ENV: "provider-env",
+    };
+    const calls: Array<{
+      command: string;
+      args: ReadonlyArray<string>;
+      env: NodeJS.ProcessEnv | undefined;
+    }> = [];
+
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseProvider);
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: () =>
+          Effect.succeed(
+            makeProviderMaintenanceCapabilities({
+              provider: CODEX_DRIVER,
+              packageName: "@openai/codex",
+              updateExecutable: "bun",
+              updateArgs: ["i", "-g", "@openai/codex@latest"],
+              updateLockKey: "bun-global",
+              updateEnv: providerEnv,
+            }),
+          ),
+      });
+
+      yield* updater.updateProvider(CODEX_DRIVER);
+      assert.strictEqual(calls.length, 1);
+      assert.strictEqual(calls[0]?.command, "bun");
+      assert.deepStrictEqual(calls[0]?.args, ["i", "-g", "@openai/codex@latest"]);
+      assert.deepStrictEqual(calls[0]?.env, providerEnv);
+      assert.notStrictEqual(calls[0]?.env, providerEnv);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          latestVersionHttpClient("0.0.0"),
+          mockSpawnerLayer((command, args, env) => {
+            calls.push({ command, args, env });
             return { stdout: "updated" };
           }),
         ),
