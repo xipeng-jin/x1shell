@@ -1,4 +1,4 @@
-import OS from "node:os";
+import * as NodeOS from "node:os";
 import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect";
 
 import {
@@ -15,8 +15,8 @@ import {
 } from "@t3tools/contracts";
 
 import { ServerConfig } from "../config.ts";
-import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
-import { SourceControlProviderRegistry } from "./SourceControlProviderRegistry.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 
 export interface SourceControlRepositoryServiceShape {
   readonly lookupRepository: (
@@ -102,10 +102,10 @@ function selectRemoteUrl(
 
 function expandHomePath(input: string, path: Path.Path): string {
   if (input === "~") {
-    return OS.homedir();
+    return NodeOS.homedir();
   }
   if (input.startsWith("~/") || input.startsWith("~\\")) {
-    return path.join(OS.homedir(), input.slice(2));
+    return path.join(NodeOS.homedir(), input.slice(2));
   }
   return input;
 }
@@ -113,9 +113,9 @@ function expandHomePath(input: string, path: Path.Path): string {
 export const make = Effect.fn("makeSourceControlRepositoryService")(function* () {
   const config = yield* ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
-  const git = yield* GitVcsDriver;
+  const git = yield* GitVcsDriver.GitVcsDriver;
   const path = yield* Path.Path;
-  const providers = yield* SourceControlProviderRegistry;
+  const providers = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
 
   const ensureConcreteProvider = (input: {
     readonly operation: string;
@@ -153,13 +153,11 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
     function* (destinationPath: string) {
       const trimmed = destinationPath.trim();
       if (trimmed.length === 0) {
-        return yield* Effect.fail(
-          repositoryError({
-            operation: "cloneRepository",
-            provider: "unknown",
-            detail: "Choose a destination path before cloning.",
-          }),
-        );
+        return yield* repositoryError({
+          operation: "cloneRepository",
+          provider: "unknown",
+          detail: "Choose a destination path before cloning.",
+        });
       }
 
       return path.resolve(expandHomePath(trimmed, path));
@@ -183,13 +181,11 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
             ),
           );
         if (entries.length > 0) {
-          return yield* Effect.fail(
-            repositoryError({
-              operation: "cloneRepository",
-              provider: "unknown",
-              detail: "Destination path already exists and is not empty.",
-            }),
-          );
+          return yield* repositoryError({
+            operation: "cloneRepository",
+            provider: "unknown",
+            detail: "Destination path already exists and is not empty.",
+          });
         }
       } else {
         yield* fileSystem.makeDirectory(path.dirname(normalizedDestination), { recursive: true });
@@ -222,13 +218,11 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
     }
 
     if (!remoteUrl) {
-      return yield* Effect.fail(
-        repositoryError({
-          operation: "cloneRepository",
-          provider,
-          detail: "Enter a repository path or clone URL before cloning.",
-        }),
-      );
+      return yield* repositoryError({
+        operation: "cloneRepository",
+        provider,
+        detail: "Enter a repository path or clone URL before cloning.",
+      });
     }
 
     yield* git.execute({
