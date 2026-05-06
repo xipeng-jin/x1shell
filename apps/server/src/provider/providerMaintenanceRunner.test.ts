@@ -462,12 +462,14 @@ describe("providerMaintenanceRunner", () => {
     },
   );
 
-  it.effect("updates a single provider instance without touching sibling instances", () => {
+  it.effect("refreshes same-driver sibling instances after a shared provider update", () => {
     const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
     return Effect.gen(function* () {
       const personalInstanceId = ProviderInstanceId.make("codex_personal");
       const workInstanceId = ProviderInstanceId.make("codex_work");
+      const openCodeInstanceId = ProviderInstanceId.make("opencode_work");
       const refreshedInstanceIds: Array<ProviderInstanceId> = [];
+      const capabilityInstanceIds: Array<ProviderInstanceId> = [];
       const { registry } = yield* makeRegistry([
         {
           ...baseProvider,
@@ -479,21 +481,28 @@ describe("providerMaintenanceRunner", () => {
           instanceId: workInstanceId,
           version: "0.124.0-alpha.3",
         },
+        {
+          ...baseOpenCodeProvider,
+          instanceId: openCodeInstanceId,
+          version: "0.1.0",
+        },
       ]);
       const updater = yield* makeTestRunner({
         ...registry,
         getProviderMaintenanceCapabilitiesForInstance: (instanceId, provider) =>
-          Effect.succeed(
-            makeProviderMaintenanceCapabilities({
+          Effect.sync(() => {
+            capabilityInstanceIds.push(instanceId);
+            return makeProviderMaintenanceCapabilities({
               provider,
-              packageName: "@openai/codex-instance-test",
+              packageName:
+                instanceId === workInstanceId
+                  ? "@openai/codex-work-instance-test"
+                  : "@openai/codex-instance-test",
               updateExecutable: "vp",
               updateArgs: ["i", "-g", "@openai/codex"],
               updateLockKey: "vite-plus-global",
-            }),
-          ).pipe(
-            Effect.tap(() => Effect.sync(() => assert.strictEqual(instanceId, personalInstanceId))),
-          ),
+            });
+          }),
         refreshInstance: (instanceId) =>
           registry.refreshInstance(instanceId).pipe(
             Effect.tap(() =>
@@ -515,11 +524,28 @@ describe("providerMaintenanceRunner", () => {
           args: ["i", "-g", "@openai/codex"],
         },
       ]);
-      assert.deepStrictEqual(refreshedInstanceIds, [personalInstanceId]);
+      assert.deepStrictEqual(refreshedInstanceIds.toSorted(), [personalInstanceId, workInstanceId]);
+      assert.deepStrictEqual(capabilityInstanceIds.toSorted(), [
+        personalInstanceId,
+        personalInstanceId,
+        workInstanceId,
+      ]);
       assert.strictEqual(result.providers[0]?.instanceId, personalInstanceId);
       assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
+      assert.strictEqual(result.providers[0]?.versionAdvisory?.status, "current");
+      assert.strictEqual(
+        result.providers[0]?.versionAdvisory?.updateCommand,
+        "vp i -g @openai/codex",
+      );
       assert.strictEqual(result.providers[1]?.instanceId, workInstanceId);
       assert.strictEqual(result.providers[1]?.updateState, undefined);
+      assert.strictEqual(result.providers[1]?.versionAdvisory?.status, "current");
+      assert.strictEqual(
+        result.providers[1]?.versionAdvisory?.updateCommand,
+        "vp i -g @openai/codex",
+      );
+      assert.strictEqual(result.providers[2]?.instanceId, openCodeInstanceId);
+      assert.strictEqual(result.providers[2]?.versionAdvisory?.status, undefined);
     }).pipe(
       Effect.provide(
         Layer.mergeAll(

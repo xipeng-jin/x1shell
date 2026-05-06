@@ -17,7 +17,6 @@ import {
   layer as ProviderMaintenanceCommandCoordinatorLayer,
 } from "./providerMaintenanceCommandCoordinator.ts";
 import { enrichProviderSnapshotWithVersionAdvisory } from "./providerMaintenance.ts";
-import type { ProviderMaintenanceCapabilities } from "./providerMaintenance.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
@@ -195,15 +194,12 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
 
   const verifyRefreshedProvider = (
     provider: ProviderDriverKind,
-    maintenanceCapabilities: ProviderMaintenanceCapabilities,
     instanceId: ProviderInstanceId,
   ): Effect.Effect<VerifiedProviderRefresh> =>
     providerRegistry.getProviders.pipe(
       Effect.map((providers) =>
         providers
-          .filter(
-            (candidate) => candidate.driver === provider && candidate.instanceId === instanceId,
-          )
+          .filter((candidate) => candidate.driver === provider)
           .map((candidate) => candidate.instanceId),
       ),
       Effect.flatMap((instanceIds) =>
@@ -219,9 +215,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
             ).pipe(Effect.andThen(providerRegistry.getProviders)),
       ),
       Effect.flatMap((providers) => {
-        const refreshedProviders = providers.filter(
-          (candidate) => candidate.driver === provider && candidate.instanceId === instanceId,
-        );
+        const refreshedProviders = providers.filter((candidate) => candidate.driver === provider);
         if (refreshedProviders.length === 0) {
           return Effect.succeed<VerifiedProviderRefresh>({
             providers,
@@ -231,10 +225,19 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
         return Effect.forEach(
           refreshedProviders,
           (refreshedProvider) =>
-            enrichProviderSnapshotWithVersionAdvisory(
-              refreshedProvider,
-              maintenanceCapabilities,
-            ).pipe(Effect.provideService(HttpClient.HttpClient, httpClient)),
+            providerRegistry
+              .getProviderMaintenanceCapabilitiesForInstance(
+                refreshedProvider.instanceId,
+                refreshedProvider.driver,
+              )
+              .pipe(
+                Effect.flatMap((maintenanceCapabilities) =>
+                  enrichProviderSnapshotWithVersionAdvisory(
+                    refreshedProvider,
+                    maintenanceCapabilities,
+                  ).pipe(Effect.provideService(HttpClient.HttpClient, httpClient)),
+                ),
+              ),
           {
             concurrency: "unbounded",
           },
@@ -333,15 +336,12 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
               );
             }
 
-            const { verifiedProviders } = yield* verifyRefreshedProvider(
-              provider,
-              capabilities,
-              instanceId,
+            const { verifiedProviders } = yield* verifyRefreshedProvider(provider, instanceId);
+            const verifiedTargetProvider = verifiedProviders.find(
+              (verifiedProvider) => verifiedProvider.instanceId === instanceId,
             );
-            const couldNotVerify = verifiedProviders.length === 0;
-            const stillOutdated =
-              couldNotVerify ||
-              verifiedProviders.some((verifiedProvider) => isOutdatedProvider(verifiedProvider));
+            const couldNotVerify = verifiedTargetProvider === undefined;
+            const stillOutdated = couldNotVerify || isOutdatedProvider(verifiedTargetProvider);
             return yield* finish(
               makeUpdateState({
                 status: stillOutdated ? "unchanged" : "succeeded",
