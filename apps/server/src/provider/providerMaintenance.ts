@@ -52,6 +52,14 @@ export interface PackageManagedProviderMaintenanceDefinition {
   } | null;
 }
 
+export interface SelfUpdateProviderMaintenanceDefinition {
+  readonly provider: ProviderDriverKind;
+  readonly defaultExecutable: string;
+  readonly args: ReadonlyArray<string>;
+  readonly lockKey: string;
+  readonly packageName: string | null;
+}
+
 interface LatestVersionCacheEntry {
   readonly expiresAt: number;
   readonly version: string | null;
@@ -323,6 +331,22 @@ export function makeStaticProviderMaintenanceResolver(
 ): ProviderMaintenanceCapabilitiesResolver {
   return {
     resolve: () => capabilities,
+  };
+}
+
+export function makeSelfUpdateProviderMaintenanceResolver(
+  definition: SelfUpdateProviderMaintenanceDefinition,
+): ProviderMaintenanceCapabilitiesResolver {
+  return {
+    resolve: (options) =>
+      makeProviderMaintenanceCapabilities({
+        provider: definition.provider,
+        packageName: definition.packageName,
+        updateExecutable: nonEmptyString(options?.binaryPath) ?? definition.defaultExecutable,
+        updateArgs: definition.args,
+        updateLockKey: definition.lockKey,
+        ...(options?.env ? { updateEnv: options.env } : {}),
+      }),
   };
 }
 

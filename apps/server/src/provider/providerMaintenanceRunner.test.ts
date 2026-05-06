@@ -334,6 +334,55 @@ describe("providerMaintenanceRunner", () => {
     );
   });
 
+  it.effect("runs Cursor self-updates with the configured binary executable", () => {
+    const cursorEnv: NodeJS.ProcessEnv = {
+      PATH: "/cursor/bin",
+      X1_CURSOR_TEST_ENV: "cursor-env",
+    };
+    const calls: Array<{
+      command: string;
+      args: ReadonlyArray<string>;
+      env: NodeJS.ProcessEnv | undefined;
+    }> = [];
+
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseCursorProvider);
+      const updater = yield* makeTestRunner({
+        ...registry,
+        getProviderMaintenanceCapabilitiesForInstance: () =>
+          Effect.succeed(
+            makeProviderMaintenanceCapabilities({
+              provider: CURSOR_DRIVER,
+              packageName: null,
+              updateExecutable: "/opt/cursor-agent/bin/agent",
+              updateArgs: ["update"],
+              updateLockKey: "cursor-agent",
+              updateEnv: cursorEnv,
+            }),
+          ),
+      });
+
+      yield* updater.updateProvider(CURSOR_DRIVER);
+      assert.deepStrictEqual(calls, [
+        {
+          command: "/opt/cursor-agent/bin/agent",
+          args: ["update"],
+          env: cursorEnv,
+        },
+      ]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          latestVersionHttpClient("0.0.0"),
+          mockSpawnerLayer((command, args, env) => {
+            calls.push({ command, args, env });
+            return { stdout: "updated" };
+          }),
+        ),
+      ),
+    );
+  });
+
   it.effect("runs provider updates with the resolved provider environment", () => {
     const providerEnv: NodeJS.ProcessEnv = {
       ...process.env,

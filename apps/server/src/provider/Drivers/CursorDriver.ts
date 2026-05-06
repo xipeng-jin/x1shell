@@ -36,22 +36,19 @@ import {
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
-  makeProviderMaintenanceCapabilities,
-  makeStaticProviderMaintenanceResolver,
+  makeSelfUpdateProviderMaintenanceResolver,
   resolveProviderMaintenanceCapabilitiesEffect,
 } from "../providerMaintenance.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("cursor");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
-const UPDATE = makeStaticProviderMaintenanceResolver(
-  makeProviderMaintenanceCapabilities({
-    provider: DRIVER_KIND,
-    packageName: null,
-    updateExecutable: "agent",
-    updateArgs: ["update"],
-    updateLockKey: "cursor-agent",
-  }),
-);
+const UPDATE = makeSelfUpdateProviderMaintenanceResolver({
+  provider: DRIVER_KIND,
+  packageName: null,
+  defaultExecutable: "agent",
+  args: ["update"],
+  lockKey: "cursor-agent",
+});
 
 export type CursorDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner

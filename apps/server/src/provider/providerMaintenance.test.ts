@@ -10,6 +10,7 @@ import {
   createProviderVersionAdvisory,
   makePackageManagedProviderMaintenanceResolver,
   makeProviderMaintenanceCapabilities,
+  makeSelfUpdateProviderMaintenanceResolver,
   makeStaticProviderMaintenanceResolver,
   normalizeCommandPath,
   resolveProviderMaintenanceCapabilitiesEffect,
@@ -61,6 +62,13 @@ const staticToolUpdate = makeStaticProviderMaintenanceResolver(
     updateLockKey: "static-tool",
   }),
 );
+const selfUpdateToolUpdate = makeSelfUpdateProviderMaintenanceResolver({
+  provider: driver("selfUpdateTool"),
+  packageName: null,
+  defaultExecutable: "self-tool",
+  args: ["update"],
+  lockKey: "self-tool",
+});
 
 afterEach(() => {
   clearLatestProviderVersionCacheForTests();
@@ -126,6 +134,69 @@ describe("providerMaintenance", () => {
         args: ["update"],
 
         lockKey: "static-tool",
+      },
+    });
+  });
+
+  it("uses the default executable for self-updating providers without a configured binary", () => {
+    expect(selfUpdateToolUpdate.resolve()).toEqual({
+      provider: driver("selfUpdateTool"),
+      packageName: null,
+      update: {
+        command: "self-tool update",
+
+        executable: "self-tool",
+
+        args: ["update"],
+
+        lockKey: "self-tool",
+      },
+    });
+  });
+
+  it("uses the configured binary for self-updating provider commands", () => {
+    const env = {
+      PATH: "/custom/bin",
+      HOME: "/custom/home",
+    };
+
+    expect(
+      selfUpdateToolUpdate.resolve({
+        binaryPath: "/opt/custom/self-tool",
+        env,
+      }),
+    ).toEqual({
+      provider: driver("selfUpdateTool"),
+      packageName: null,
+      update: {
+        command: "/opt/custom/self-tool update",
+
+        executable: "/opt/custom/self-tool",
+
+        args: ["update"],
+
+        lockKey: "self-tool",
+        env,
+      },
+    });
+  });
+
+  it("falls back to the default executable for blank self-updating provider binary paths", () => {
+    expect(
+      selfUpdateToolUpdate.resolve({
+        binaryPath: "  ",
+      }),
+    ).toEqual({
+      provider: driver("selfUpdateTool"),
+      packageName: null,
+      update: {
+        command: "self-tool update",
+
+        executable: "self-tool",
+
+        args: ["update"],
+
+        lockKey: "self-tool",
       },
     });
   });
