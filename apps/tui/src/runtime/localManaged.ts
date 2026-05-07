@@ -47,6 +47,7 @@ export interface StartLocalManagedSupervisorOptions {
   readonly execFile?: typeof execFile;
   readonly resolvePort?: () => Promise<number>;
   readonly maxBindRetries?: number;
+  readonly fetchTimeouts?: Partial<LocalManagedFetchTimeouts>;
 }
 
 class BindFailureStartupError extends Error {
@@ -58,10 +59,25 @@ class BindFailureStartupError extends Error {
   }
 }
 
+interface LocalManagedFetchTimeouts {
+  readonly readinessRequestMs: number;
+  readonly readinessDeadlineMs: number;
+  readonly attachRequestMs: number;
+  readonly bootstrapRequestMs: number;
+}
+
+const DEFAULT_FETCH_TIMEOUTS: LocalManagedFetchTimeouts = {
+  readinessRequestMs: 1_000,
+  readinessDeadlineMs: 15_000,
+  attachRequestMs: 5_000,
+  bootstrapRequestMs: 5_000,
+};
+
 export async function startLocalManagedSupervisor(
   options: StartLocalManagedSupervisorOptions,
 ): Promise<LocalManagedSupervisor> {
   const logger = options.logger;
+  const fetchTimeouts = resolveFetchTimeouts(options.fetchTimeouts);
   const commandResolution = await resolveServerCommand({
     cwd: options.cwd ?? process.cwd(),
     ...(options.serverEntry ? { explicitEntry: options.serverEntry } : {}),
@@ -73,8 +89,13 @@ export async function startLocalManagedSupervisor(
   });
 
   if (!options.newServer) {
-    const existing = await tryAttachExisting({ ...options, command: commandResolution.command });
+    const existing = await tryAttachExisting({
+      ...options,
+      command: commandResolution.command,
+      fetchTimeouts,
+    });
     if (existing) {
+      logger?.info("local attach target ready", { origin: existing.httpBaseUrl });
       logger?.info("attached to existing local server", { origin: existing.httpBaseUrl });
       return {
         target: existing,
@@ -93,6 +114,7 @@ export async function startLocalManagedSupervisor(
   let current = await startOwnedServerWithRetries({
     options,
     command: commandResolution.command,
+    fetchTimeouts,
   });
   const restartListeners = new Set<(target: AttachTarget) => void | Promise<void>>();
 
@@ -115,7 +137,7 @@ export async function startLocalManagedSupervisor(
       }
       if (restarting) return;
       restarting = true;
-      void restartOwnedServer({ options, command: commandResolution.command })
+      void restartOwnedServer({ options, command: commandResolution.command, fetchTimeouts })
         .catch((error) => {
           logger?.error("local server restart failed", safeOutputUnknown(error));
         })
@@ -128,6 +150,7 @@ export async function startLocalManagedSupervisor(
   const restartOwnedServer = async (input: {
     readonly options: StartLocalManagedSupervisorOptions;
     readonly command: ServerCommandSpec;
+    readonly fetchTimeouts: LocalManagedFetchTimeouts;
   }) => {
     logger?.warn("local server exited; restarting from authoritative snapshots");
     const next = await startOwnedServerWithRetries(input);
@@ -169,15 +192,23 @@ export async function startLocalManagedSupervisor(
 }
 
 async function tryAttachExisting(
-  options: StartLocalManagedSupervisorOptions & { readonly command: ServerCommandSpec },
+  options: StartLocalManagedSupervisorOptions & {
+    readonly command: ServerCommandSpec;
+    readonly fetchTimeouts: LocalManagedFetchTimeouts;
+  },
 ): Promise<AttachTarget | null> {
   try {
+    options.logger?.info("checking existing local server runtime state");
     return await resolveLocalAttachTarget({
       baseDir: options.baseDir,
       ...(options.devUrl ? { devUrl: options.devUrl } : {}),
       serverCommand: options.command,
       ...(options.execFile ? { execFile: options.execFile } : {}),
-      ...(options.fetchOptions ? { fetchOptions: options.fetchOptions } : {}),
+      fetchOptions: boundedFetchOptions({
+        options: options.fetchOptions,
+        timeoutMs: options.fetchTimeouts.attachRequestMs,
+        phase: "local attach validation",
+      }),
     });
   } catch (error) {
     const message = String(error instanceof Error ? error.message : error);
@@ -194,6 +225,7 @@ function isAttachMissOrStale(message: string): boolean {
     /No local environment-id/.test(message) ||
     /No local server runtime state/.test(message) ||
     /runtime state is stale/.test(message) ||
+    /local attach validation timed out/.test(message) ||
     /Required local server file/.test(message)
   );
 }
@@ -201,6 +233,7 @@ function isAttachMissOrStale(message: string): boolean {
 async function startOwnedServerWithRetries(input: {
   readonly options: StartLocalManagedSupervisorOptions;
   readonly command: ServerCommandSpec;
+  readonly fetchTimeouts: LocalManagedFetchTimeouts;
 }): Promise<{
   readonly child: ChildProcess;
   readonly target: AttachTarget;
@@ -228,6 +261,7 @@ async function startOwnedServerWithRetries(input: {
 async function startOwnedServerAttempt(input: {
   readonly options: StartLocalManagedSupervisorOptions;
   readonly command: ServerCommandSpec;
+  readonly fetchTimeouts: LocalManagedFetchTimeouts;
 }): Promise<{
   readonly child: ChildProcess;
   readonly target: AttachTarget;
@@ -251,14 +285,29 @@ async function startOwnedServerAttempt(input: {
   });
 
   try {
-    await waitForEnvironmentDescriptor(origin, options.fetchOptions, child, () =>
-      stderrChunks.join(""),
-    );
+    options.logger?.info("local server descriptor polling started", { origin });
+    await waitForEnvironmentDescriptor({
+      origin,
+      fetchOptions: options.fetchOptions,
+      fetchTimeouts: input.fetchTimeouts,
+      child,
+      stderr: () => stderrChunks.join(""),
+    });
+    options.logger?.info("local server descriptor ready", { origin });
+    options.logger?.info("local server bootstrap exchange started", { origin });
     const target = await resolveBootstrapAttachTarget({
       baseUrl: origin,
       credential: bootstrapToken,
-      ...(options.fetchOptions ? { options: { fetchOptions: options.fetchOptions } } : {}),
+      options: {
+        fetchOptions: boundedFetchOptions({
+          options: options.fetchOptions,
+          timeoutMs: input.fetchTimeouts.bootstrapRequestMs,
+          phase: "local bootstrap exchange",
+        }),
+      },
     });
+    options.logger?.info("local server bootstrap exchange finished", { origin });
+    options.logger?.info("local attach target ready", { origin: target.httpBaseUrl });
     return {
       child,
       target,
@@ -345,31 +394,32 @@ export function assertNoLegacySpawnFlags(args: readonly string[]): void {
   }
 }
 
-async function waitForEnvironmentDescriptor(
-  origin: string,
-  fetchOptions: EnvironmentFetchOptions | undefined,
-  child: ChildProcess,
-  stderr: () => string,
-): Promise<void> {
-  const deadline = Date.now() + 15_000;
+async function waitForEnvironmentDescriptor(input: {
+  readonly origin: string;
+  readonly fetchOptions: EnvironmentFetchOptions | undefined;
+  readonly fetchTimeouts: LocalManagedFetchTimeouts;
+  readonly child: ChildProcess;
+  readonly stderr: () => string;
+}): Promise<void> {
+  const deadline = Date.now() + input.fetchTimeouts.readinessDeadlineMs;
   let lastError: unknown;
   let exited: {
     readonly code: number | null;
     readonly signal: NodeJS.Signals | null;
   } | null = null;
-  child.once("exit", (code, signal) => {
+  input.child.once("exit", (code, signal) => {
     exited = { code, signal };
   });
   while (Date.now() < deadline) {
-    if (exited === null && (child.exitCode !== null || child.signalCode !== null)) {
-      exited = { code: child.exitCode, signal: child.signalCode };
+    if (exited === null && (input.child.exitCode !== null || input.child.signalCode !== null)) {
+      exited = { code: input.child.exitCode, signal: input.child.signalCode };
     }
     if (exited !== null) {
       const exit = exited as {
         readonly code: number | null;
         readonly signal: NodeJS.Signals | null;
       };
-      const capturedStderr = stderr();
+      const capturedStderr = input.stderr();
       if (
         classifyExit({
           code: exit.code,
@@ -389,8 +439,12 @@ async function waitForEnvironmentDescriptor(
     }
     try {
       await fetchEnvironmentDescriptor({
-        httpBaseUrl: origin,
-        ...(fetchOptions ? { options: fetchOptions } : {}),
+        httpBaseUrl: input.origin,
+        options: boundedFetchOptions({
+          options: input.fetchOptions,
+          timeoutMs: input.fetchTimeouts.readinessRequestMs,
+          phase: "local readiness descriptor fetch",
+        }),
       });
       return;
     } catch (error) {
@@ -399,6 +453,60 @@ async function waitForEnvironmentDescriptor(
     }
   }
   throw new Error(`Local server did not become ready: ${safeOutputUnknown(lastError)}`);
+}
+
+function resolveFetchTimeouts(
+  overrides: Partial<LocalManagedFetchTimeouts> | undefined,
+): LocalManagedFetchTimeouts {
+  return { ...DEFAULT_FETCH_TIMEOUTS, ...overrides };
+}
+
+function boundedFetchOptions(input: {
+  readonly options: EnvironmentFetchOptions | undefined;
+  readonly timeoutMs: number;
+  readonly phase: string;
+}): EnvironmentFetchOptions {
+  return {
+    ...input.options,
+    fetch: makeBoundedFetch({
+      fetchImpl: input.options?.fetch,
+      timeoutMs: input.timeoutMs,
+      phase: input.phase,
+    }),
+  };
+}
+
+function makeBoundedFetch(input: {
+  readonly fetchImpl: typeof fetch | undefined;
+  readonly timeoutMs: number;
+  readonly phase: string;
+}): typeof fetch {
+  const boundedFetch = async (url: URL | RequestInfo, init?: RequestInit) => {
+    const fetchImpl = input.fetchImpl ?? globalThis.fetch;
+    if (!fetchImpl) {
+      throw new Error("No fetch implementation is available. Pass fetch explicitly.");
+    }
+    const controller = new AbortController();
+    const signal = init?.signal
+      ? AbortSignal.any([init.signal, controller.signal])
+      : controller.signal;
+    const timeoutError = new Error(`${input.phase} timed out after ${input.timeoutMs}ms.`);
+    const fetchPromise = fetchImpl(url, { ...init, signal });
+    let timeout: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(() => {
+        controller.abort(timeoutError);
+        reject(timeoutError);
+      }, input.timeoutMs);
+      timeout.unref?.();
+    });
+    try {
+      return await Promise.race([fetchPromise, timeoutPromise]);
+    } finally {
+      clearTimeout(timeout!);
+    }
+  };
+  return boundedFetch as typeof fetch;
 }
 
 function resolveTargetWebSocketUrl(target: AttachTarget): Promise<string | URL> | string | URL {

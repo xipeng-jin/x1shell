@@ -194,7 +194,7 @@ describe("App headless smoke", () => {
   it("formats async action failures for submit error display without preserving controls", () => {
     const message = displayText(
       String(
-      new Error("RpcClientDefect token=submit-secret \u001b]8;;https://evil.example\u0007link"),
+        new Error("RpcClientDefect token=submit-secret \u001b]8;;https://evil.example\u0007link"),
       ),
     );
 
