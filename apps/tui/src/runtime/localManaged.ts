@@ -191,6 +191,7 @@ async function tryAttachExisting(
 
 function isAttachMissOrStale(message: string): boolean {
   return (
+    /No local environment-id/.test(message) ||
     /No local server runtime state/.test(message) ||
     /runtime state is stale/.test(message) ||
     /Required local server file/.test(message)

@@ -167,6 +167,9 @@ export function deriveLocalServerStatePaths(input: {
 
 export async function resolveLocalAttachTarget(input: LocalAttachOptions): Promise<AttachTarget> {
   const paths = deriveLocalServerStatePaths(input);
+  if (!(await fileIsReadable(paths.environmentIdPath))) {
+    throw new Error("No local environment-id was found for the intended state root.");
+  }
   const localEnvironmentId = await readRequiredTrimmedFile(paths.environmentIdPath);
   const runtimeState = await readRuntimeState(paths.runtimeStatePath);
   if (!runtimeState) {
@@ -179,6 +182,9 @@ export async function resolveLocalAttachTarget(input: LocalAttachOptions): Promi
     ...optionalFetchOptions(input.fetchOptions),
   });
   if (staleReason) {
+    if (staleReason === "environment descriptor is not compatible") {
+      throw new Error("Attached server is not compatible with this X1Shell TUI.");
+    }
     await compareBeforeDeleteRuntimeState(paths.runtimeStatePath, runtimeState);
     throw new Error(`Local server runtime state is stale: ${redactText(staleReason)}.`);
   }

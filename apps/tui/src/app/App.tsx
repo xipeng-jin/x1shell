@@ -275,11 +275,14 @@ export function App(props: {
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") {
       if (activeThreadHeader?.session?.status === "running" && activeThreadHeader.id) {
-        void props.onSubmitCommand?.(
-          buildThreadTurnInterrupt({
-            threadId: activeThreadHeader.id,
-            turnId: activeThreadHeader.session.activeTurnId,
-          }),
+        const turnId = activeThreadHeader.session.activeTurnId;
+        runAsyncAction(() =>
+          props.onSubmitCommand?.(
+            buildThreadTurnInterrupt({
+              threadId: activeThreadHeader.id,
+              turnId,
+            }),
+          ),
         );
       } else {
         props.onRequestExit();
@@ -313,7 +316,7 @@ export function App(props: {
         if (action) {
           setVisiblePanel(null);
           setPaletteQuery("");
-          void performAction(action.id);
+          runAsyncAction(() => performAction(action.id));
         }
         return;
       }
@@ -360,12 +363,14 @@ export function App(props: {
           selectedOptions: selectedInputOptions,
           customAnswers: customInputAnswers,
         });
-        void props.onSubmitCommand?.(
-          buildThreadUserInputResponse({
-            threadId: activeThreadHeader.id,
-            requestId: activePendingUserInput.requestId,
-            answers,
-          }),
+        runAsyncAction(() =>
+          props.onSubmitCommand?.(
+            buildThreadUserInputResponse({
+              threadId: activeThreadHeader.id,
+              requestId: activePendingUserInput.requestId,
+              answers,
+            }),
+          ),
         );
         setCustomInputAnswers({});
         setSelectedInputOptions({});
@@ -454,27 +459,27 @@ export function App(props: {
       return;
     }
     if (composerText.length === 0 && key.name === "R") {
-      void performAction("connection.reconnect");
+      runAsyncAction(() => performAction("connection.reconnect"));
       return;
     }
     if (composerText.length === 0 && key.name === "p") {
-      void performAction("providers.refresh");
+      runAsyncAction(() => performAction("providers.refresh"));
       return;
     }
     if (composerText.length === 0 && key.name === "g") {
-      void performAction("vcs.refresh");
+      runAsyncAction(() => performAction("vcs.refresh"));
       return;
     }
     if (composerText.length === 0 && key.name === "m") {
-      void performAction("model.next");
+      runAsyncAction(() => performAction("model.next"));
       return;
     }
     if (composerText.length === 0 && key.name === "r") {
-      void performAction("runtime.next");
+      runAsyncAction(() => performAction("runtime.next"));
       return;
     }
     if (composerText.length === 0 && key.name === "i") {
-      void performAction("interaction.next");
+      runAsyncAction(() => performAction("interaction.next"));
       return;
     }
     if (activePendingApproval && activeThreadHeader?.id && composerText.length === 0) {
@@ -489,38 +494,40 @@ export function App(props: {
                 ? "cancel"
                 : null;
       if (decision) {
-        void props.onSubmitCommand?.(
-          buildThreadApprovalResponse({
-            threadId: activeThreadHeader.id,
-            requestId: activePendingApproval.requestId,
-            decision,
-          }),
+        runAsyncAction(() =>
+          props.onSubmitCommand?.(
+            buildThreadApprovalResponse({
+              threadId: activeThreadHeader.id,
+              requestId: activePendingApproval.requestId,
+              decision,
+            }),
+          ),
         );
         return;
       }
     }
     if (key.name === "q" && composerText.length === 0) {
-      void performAction("turn.interrupt-or-exit");
+      runAsyncAction(() => performAction("turn.interrupt-or-exit"));
       return;
     }
     if (composerText.length === 0 && key.name === "up") {
-      void performAction("thread.previous");
+      runAsyncAction(() => performAction("thread.previous"));
       return;
     }
     if (composerText.length === 0 && key.name === "down") {
-      void performAction("thread.next");
+      runAsyncAction(() => performAction("thread.next"));
       return;
     }
     if (key.ctrl && key.name === "n") {
-      void performAction("thread.new");
+      runAsyncAction(() => performAction("thread.new"));
       return;
     }
     if (composerText.length === 0 && key.name === "s" && canStopThreadSession(activeThreadHeader)) {
-      void performAction("thread.stop");
+      runAsyncAction(() => performAction("thread.stop"));
       return;
     }
     if (composerText.length === 0 && key.name === "a" && activeThreadHeader?.id) {
-      void performAction("thread.archive-toggle");
+      runAsyncAction(() => performAction("thread.archive-toggle"));
       return;
     }
     if (key.name === "backspace") {
@@ -528,7 +535,7 @@ export function App(props: {
       return;
     }
     if (key.name === "return" || key.name === "enter") {
-      void submit();
+      runAsyncAction(() => submit());
       return;
     }
     if (isPlainTextSequence(key)) {
@@ -562,6 +569,19 @@ export function App(props: {
 
   function setDraftAttachments(attachments: readonly UploadChatAttachment[]) {
     if (draftProjectId) props.onDraftAttachmentsChange?.(draftProjectId, attachments);
+  }
+
+  function runAsyncAction(action: () => Promise<unknown> | unknown): void {
+    try {
+      const result = action();
+      if (result && typeof (result as Promise<unknown>).then === "function") {
+        void (result as Promise<unknown>).catch((error: unknown) => {
+          setSubmitError(displayText(String(error)));
+        });
+      }
+    } catch (error) {
+      setSubmitError(displayText(String(error)));
+    }
   }
 
   function selectAdjacentProject(direction: 1 | -1) {
@@ -690,7 +710,7 @@ export function App(props: {
         setVisiblePanel(visiblePanel === "settings" ? null : "settings");
         return;
       case "model.next":
-        cycleModel();
+        await cycleModel();
         return;
       case "runtime.next":
         await setRuntimeMode(nextRuntimeMode(selectedRuntimeMode));
@@ -785,7 +805,7 @@ export function App(props: {
     }
   }
 
-  function cycleModel() {
+  async function cycleModel() {
     if (!draftProjectId || !status.config?.providers.length) return;
     const models = deriveProviderInstanceEntries(status.config.providers).flatMap((entry) =>
       providerSelectable(entry.provider)
@@ -807,7 +827,7 @@ export function App(props: {
         ...threadControlContext,
         modelSelection: next as ModelSelection,
       });
-      void props.onSubmitCommand?.(
+      await props.onSubmitCommand?.(
         buildThreadMetaUpdate({
           threadId: activeThreadHeader.id,
           modelSelection: next as ModelSelection,
@@ -941,8 +961,8 @@ export function App(props: {
               setSidebarCollapsedPreference((current) => !current);
             }
           }}
-          onToggleDiff={() => void performAction("diff.toggle")}
-          onRefreshVcs={() => void performAction("vcs.refresh")}
+          onToggleDiff={() => runAsyncAction(() => performAction("diff.toggle"))}
+          onRefreshVcs={() => runAsyncAction(() => performAction("vcs.refresh"))}
           viewportColumns={dimensions.width}
           gitStatus={gitStatus}
           diffActive={visiblePanel === "diff"}
@@ -1010,11 +1030,11 @@ export function App(props: {
           isRunning={activeThreadHeader?.session?.status === "running"}
           layout={layout}
           viewportColumns={dimensions.width}
-          onCycleModel={() => void performAction("model.next")}
-          onCycleRuntime={() => void performAction("runtime.next")}
-          onCycleInteraction={() => void performAction("interaction.next")}
-          onPrimaryAction={() => void performAction("message.send")}
-          onStop={() => void performAction("thread.stop")}
+          onCycleModel={() => runAsyncAction(() => performAction("model.next"))}
+          onCycleRuntime={() => runAsyncAction(() => performAction("runtime.next"))}
+          onCycleInteraction={() => runAsyncAction(() => performAction("interaction.next"))}
+          onPrimaryAction={() => runAsyncAction(() => performAction("message.send"))}
+          onStop={() => runAsyncAction(() => performAction("thread.stop"))}
           focused={focusArea === "composer"}
           controlsFocused={focusArea === "controls"}
           onFocusComposer={() => setFocusArea("composer")}

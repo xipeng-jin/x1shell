@@ -1,9 +1,13 @@
 import { execFileSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   captureProcessListeners,
   removeAddedProcessListeners,
 } from "./runtime/processListeners.js";
+
+const TUI_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("renderer lifecycle", () => {
   const cleanup: (() => void)[] = [];
@@ -41,7 +45,7 @@ describe("renderer lifecycle", () => {
 
   it("keeps OpenTUI input and resize listeners bounded across store updates", () => {
     const output = execFileSync("bun", ["run", "src/test/openTuiListenerLeakSmoke.tsx"], {
-      cwd: process.cwd(),
+      cwd: TUI_PACKAGE_DIR,
       encoding: "utf8",
       stdio: "pipe",
     });

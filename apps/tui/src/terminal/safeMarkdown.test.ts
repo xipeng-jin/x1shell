@@ -1,9 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { containsUnsafeTerminalControl } from "./safeTextStream.js";
 import { createSafeMarkdownStream, renderSafeMarkdown } from "./safeMarkdown.js";
+
+const TUI_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 describe("safeMarkdown", () => {
   it("neutralizes markdown links, images, and bare URLs as inert text", () => {
@@ -39,7 +42,7 @@ describe("safeMarkdown", () => {
     const framePath = join(dir, "frame.txt");
 
     execFileSync("bun", ["run", "src/test/openTuiSafeMarkdownSmoke.tsx", framePath], {
-      cwd: process.cwd(),
+      cwd: TUI_PACKAGE_DIR,
       stdio: "pipe",
     });
 
@@ -56,7 +59,7 @@ describe("safeMarkdown", () => {
     const framePath = join(dir, "frame.txt");
 
     execFileSync("bun", ["run", "src/test/openTuiSafeMarkdownSmoke.tsx", framePath, "split"], {
-      cwd: process.cwd(),
+      cwd: TUI_PACKAGE_DIR,
       stdio: "pipe",
     });
 

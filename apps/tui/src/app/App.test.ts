@@ -1,11 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type ProjectId,
   type UploadChatAttachment,
 } from "@t3tools/contracts";
+import { displayText } from "../domain/display.js";
 import { describe, expect, it } from "vitest";
 import {
   canAppendComposerAttachment,
@@ -15,6 +17,8 @@ import {
   isPlainTextSequence,
   parseComposerAttachmentInput,
 } from "./input.js";
+
+const TUI_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 describe("App headless smoke", () => {
   it("captures a static boot frame", () => {
@@ -32,7 +36,7 @@ describe("App headless smoke", () => {
         `--headless-frame=${framePath}`,
       ],
       {
-        cwd: process.cwd(),
+        cwd: TUI_PACKAGE_DIR,
         env: {
           ...process.env,
           X1SHELL_CONFIG_HOME: join(dir, "X1SHELL_TOKEN=secret", "config"),
@@ -76,7 +80,7 @@ describe("App headless smoke", () => {
         `--headless-frame=${framePath}`,
       ],
       {
-        cwd: process.cwd(),
+        cwd: TUI_PACKAGE_DIR,
         env: {
           ...process.env,
           X1SHELL_HEADLESS_FIXTURE: "1",
@@ -185,6 +189,20 @@ describe("App headless smoke", () => {
       canAppendComposerAttachment(Array(PROVIDER_SEND_TURN_MAX_ATTACHMENTS).fill(attachment)),
     ).toBe(false);
     expect(composerAttachmentLimitMessage()).toContain(String(PROVIDER_SEND_TURN_MAX_ATTACHMENTS));
+  });
+
+  it("formats async action failures for submit error display without preserving controls", () => {
+    const message = displayText(
+      String(
+      new Error("RpcClientDefect token=submit-secret \u001b]8;;https://evil.example\u0007link"),
+      ),
+    );
+
+    expect(message).toContain("RpcClientDefect");
+    expect(message).toContain("link");
+    expect(message).not.toContain("\u001b]8");
+    expect(message).not.toContain("evil.example");
+    expect(message).not.toContain("submit-secret");
   });
 });
 
