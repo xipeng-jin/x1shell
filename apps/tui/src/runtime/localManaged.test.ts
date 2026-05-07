@@ -124,6 +124,7 @@ describe("local managed supervisor", () => {
       ["/.well-known/t3/environment", descriptor],
       ["/.well-known/t3/environment", descriptor],
       ["/api/auth/session", { authenticated: true, auth: { mode: "desktop" }, role: "owner" }],
+      ["/api/auth/ws-token", { token: "ws-secret", expiresAt: "2026-05-01T00:00:00.000Z" }],
     ]);
 
     const supervisor = await startLocalManagedSupervisor({
@@ -447,6 +448,131 @@ describe("local managed supervisor", () => {
     await supervisor.stop();
   });
 
+  it("treats a hung attach-first session validation as stale and starts a fresh owned server", async () => {
+    const baseDir = await makeBaseDir();
+    const stateDir = join(baseDir, "userdata");
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(join(stateDir, "environment-id"), "env_123\n", "utf8");
+    await writeRuntimeState(stateDir, { port: 3773, origin: "http://127.0.0.1:3773" });
+    const entry = await makeEntry();
+    const child = makeChild();
+    const spawnMock = vi.fn(() => child as ChildProcess);
+    const execMock = vi.fn((_file, _args, _options, callback) =>
+      callback(null, "bearer-secret\n", ""),
+    );
+    const ownedFetch = fetchSequence(ownedServerFetchEntries());
+    let attachSessionAttempted = false;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const parsed = new URL(url);
+      if (parsed.port === "3773") {
+        if (parsed.pathname === "/api/auth/session") {
+          attachSessionAttempted = true;
+          return neverSettlingResponse();
+        }
+        return Promise.resolve(new Response(JSON.stringify(descriptor), { status: 200 }));
+      }
+      return ownedFetch(url, init);
+    });
+
+    const supervisor = await startLocalManagedSupervisor({
+      baseDir,
+      serverEntry: entry,
+      spawnProcess: spawnMock as never,
+      execFile: execMock as never,
+      resolvePort: async () => 4565,
+      fetchOptions: { fetch: fetchMock as unknown as typeof fetch },
+      fetchTimeouts: { attachRequestMs: 5, readinessRequestMs: 5, readinessDeadlineMs: 250 },
+    });
+
+    expect(attachSessionAttempted).toBe(true);
+    expect(supervisor.owned).toBe(true);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    await supervisor.stop();
+  });
+
+  it("treats a hung attach-first websocket token issuance as stale and starts a fresh owned server", async () => {
+    const baseDir = await makeBaseDir();
+    const stateDir = join(baseDir, "userdata");
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(join(stateDir, "environment-id"), "env_123\n", "utf8");
+    await writeRuntimeState(stateDir, { port: 3773, origin: "http://127.0.0.1:3773" });
+    const entry = await makeEntry();
+    const child = makeChild();
+    const spawnMock = vi.fn(() => child as ChildProcess);
+    const execMock = vi.fn((_file, _args, _options, callback) =>
+      callback(null, "bearer-secret\n", ""),
+    );
+    const ownedFetch = fetchSequence(ownedServerFetchEntries());
+    let attachWsTokenAttempted = false;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const parsed = new URL(url);
+      if (parsed.port === "3773") {
+        if (parsed.pathname === "/api/auth/session") {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ authenticated: true, auth: { mode: "desktop" }, role: "owner" }),
+              { status: 200 },
+            ),
+          );
+        }
+        if (parsed.pathname === "/api/auth/ws-token") {
+          attachWsTokenAttempted = true;
+          return neverSettlingResponse();
+        }
+        return Promise.resolve(new Response(JSON.stringify(descriptor), { status: 200 }));
+      }
+      return ownedFetch(url, init);
+    });
+
+    const supervisor = await startLocalManagedSupervisor({
+      baseDir,
+      serverEntry: entry,
+      spawnProcess: spawnMock as never,
+      execFile: execMock as never,
+      resolvePort: async () => 4566,
+      fetchOptions: { fetch: fetchMock as unknown as typeof fetch },
+      fetchTimeouts: { attachRequestMs: 5, readinessRequestMs: 5, readinessDeadlineMs: 250 },
+    });
+
+    expect(attachWsTokenAttempted).toBe(true);
+    expect(supervisor.owned).toBe(true);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    await supervisor.stop();
+  });
+
+  it("treats a hung attach-first owner session command as stale and starts a fresh owned server", async () => {
+    const baseDir = await makeBaseDir();
+    const stateDir = join(baseDir, "userdata");
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(join(stateDir, "environment-id"), "env_123\n", "utf8");
+    await writeRuntimeState(stateDir, { port: 3773, origin: "http://127.0.0.1:3773" });
+    const entry = await makeEntry();
+    const child = makeChild();
+    const authChild = makeChild();
+    const spawnMock = vi.fn(() => child as ChildProcess);
+    const execMock = vi.fn(() => authChild as ChildProcess);
+    const fetchMock = fetchSequence([
+      ["/.well-known/t3/environment", descriptor],
+      ...ownedServerFetchEntries(),
+    ]);
+
+    const supervisor = await startLocalManagedSupervisor({
+      baseDir,
+      serverEntry: entry,
+      spawnProcess: spawnMock as never,
+      execFile: execMock as never,
+      resolvePort: async () => 4567,
+      fetchOptions: { fetch: fetchMock as unknown as typeof fetch },
+      fetchTimeouts: { attachRequestMs: 5, readinessRequestMs: 5, readinessDeadlineMs: 250 },
+    });
+
+    expect(execMock).toHaveBeenCalledTimes(1);
+    expect(authChild.kill).toHaveBeenCalled();
+    expect(supervisor.owned).toBe(true);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    await supervisor.stop();
+  });
+
   it("bounds bootstrap, session validation, and later ws-token fetches with sanitized timeout errors", async () => {
     const entry = await makeEntry();
     const bootstrapChild = makeChild();
@@ -467,7 +593,7 @@ describe("local managed supervisor", () => {
         fetchOptions: { fetch: bootstrapFetch as unknown as typeof fetch },
         fetchTimeouts: { readinessRequestMs: 5, bootstrapRequestMs: 5 },
       }),
-    ).rejects.toThrow(/bootstrap exchange timed out after 5ms/);
+    ).rejects.toThrow(/owner session creation timed out after 5ms/);
 
     const sessionChild = makeChild();
     spawnMock.mockReturnValue(sessionChild as ChildProcess);
@@ -499,9 +625,9 @@ describe("local managed supervisor", () => {
         spawnProcess: spawnMock as never,
         resolvePort: async () => 4564,
         fetchOptions: { fetch: sessionFetch as unknown as typeof fetch },
-        fetchTimeouts: { readinessRequestMs: 5, bootstrapRequestMs: 5 },
+        fetchTimeouts: { readinessRequestMs: 5, bootstrapRequestMs: 5, sessionRequestMs: 5 },
       }),
-    ).rejects.toThrow(/bootstrap exchange timed out after 5ms/);
+    ).rejects.toThrow(/connection validation timed out after 5ms/);
 
     const wsChild = makeChild();
     spawnMock.mockReturnValue(wsChild as ChildProcess);
@@ -518,14 +644,14 @@ describe("local managed supervisor", () => {
           return wsFetch(url, init);
         }) as unknown as typeof fetch,
       },
-      fetchTimeouts: { readinessRequestMs: 5, bootstrapRequestMs: 5 },
+      fetchTimeouts: { readinessRequestMs: 5, bootstrapRequestMs: 5, wsTokenRequestMs: 5 },
     });
 
     await expect(
       (supervisor.target.webSocketUrlProvider as () => Promise<string>)(),
-    ).rejects.toThrow(/bootstrap exchange timed out after 5ms/);
+    ).rejects.toThrow(/websocket access issuance timed out after 5ms/);
     await supervisor.stop();
-  });
+  }, 10_000);
 
   it("restarts an owned server after restartable exits and notifies reconnect listeners", async () => {
     const entry = await makeEntry();

@@ -21,7 +21,7 @@
     "build": "bun run --filter t3 build && tsdown && node scripts/copy-server-dist.mjs",
     "start": "bun dist/index.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "if [ -d apps/tui/src ]; then vitest run --passWithNoTests --root apps/tui; else vitest run --passWithNoTests; fi"
+    "test": "vitest run --passWithNoTests --root ."
   },
   "dependencies": {
     "@opentui/core": "0.1.103",

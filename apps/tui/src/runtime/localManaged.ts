@@ -8,7 +8,13 @@ import {
   type EnvironmentFetchOptions,
 } from "@t3tools/client-runtime/environment";
 import type { AttachTarget, ServerCommandSpec } from "./attach.js";
-import { resolveBootstrapAttachTarget, resolveLocalAttachTarget } from "./attach.js";
+import {
+  LocalAttachMissError,
+  LocalAttachStaleError,
+  resolveBootstrapAttachTarget,
+  resolveLocalAttachTarget,
+} from "./attach.js";
+import { boundedFetchOptions } from "./boundedFetch.js";
 import type { Logger } from "./log.js";
 import { safeOutputUnknown } from "./log.js";
 import { resolveServerCommand, type ServerCommandResolution } from "./serverCommand.js";
@@ -64,6 +70,8 @@ interface LocalManagedFetchTimeouts {
   readonly readinessDeadlineMs: number;
   readonly attachRequestMs: number;
   readonly bootstrapRequestMs: number;
+  readonly sessionRequestMs: number;
+  readonly wsTokenRequestMs: number;
 }
 
 const DEFAULT_FETCH_TIMEOUTS: LocalManagedFetchTimeouts = {
@@ -71,6 +79,8 @@ const DEFAULT_FETCH_TIMEOUTS: LocalManagedFetchTimeouts = {
   readinessDeadlineMs: 15_000,
   attachRequestMs: 5_000,
   bootstrapRequestMs: 5_000,
+  sessionRequestMs: 5_000,
+  wsTokenRequestMs: 5_000,
 };
 
 export async function startLocalManagedSupervisor(
@@ -204,6 +214,7 @@ async function tryAttachExisting(
       ...(options.devUrl ? { devUrl: options.devUrl } : {}),
       serverCommand: options.command,
       ...(options.execFile ? { execFile: options.execFile } : {}),
+      ownerSessionCommandTimeoutMs: options.fetchTimeouts.attachRequestMs,
       fetchOptions: boundedFetchOptions({
         options: options.fetchOptions,
         timeoutMs: options.fetchTimeouts.attachRequestMs,
@@ -211,23 +222,12 @@ async function tryAttachExisting(
       }),
     });
   } catch (error) {
-    const message = String(error instanceof Error ? error.message : error);
-    if (isAttachMissOrStale(message)) {
-      options.logger?.warn("local attach-first did not find a reusable server", message);
+    if (error instanceof LocalAttachMissError || error instanceof LocalAttachStaleError) {
+      options.logger?.warn("local attach-first did not find a reusable server", error.message);
       return null;
     }
     throw error;
   }
-}
-
-function isAttachMissOrStale(message: string): boolean {
-  return (
-    /No local environment-id/.test(message) ||
-    /No local server runtime state/.test(message) ||
-    /runtime state is stale/.test(message) ||
-    /local attach validation timed out/.test(message) ||
-    /Required local server file/.test(message)
-  );
 }
 
 async function startOwnedServerWithRetries(input: {
@@ -299,10 +299,25 @@ async function startOwnedServerAttempt(input: {
       baseUrl: origin,
       credential: bootstrapToken,
       options: {
-        fetchOptions: boundedFetchOptions({
+        descriptorFetchOptions: boundedFetchOptions({
           options: options.fetchOptions,
           timeoutMs: input.fetchTimeouts.bootstrapRequestMs,
-          phase: "local bootstrap exchange",
+          phase: "local startup descriptor fetch",
+        }),
+        bootstrapFetchOptions: boundedFetchOptions({
+          options: options.fetchOptions,
+          timeoutMs: input.fetchTimeouts.bootstrapRequestMs,
+          phase: "local owner session creation",
+        }),
+        sessionFetchOptions: boundedFetchOptions({
+          options: options.fetchOptions,
+          timeoutMs: input.fetchTimeouts.sessionRequestMs,
+          phase: "local connection validation",
+        }),
+        wsTokenFetchOptions: boundedFetchOptions({
+          options: options.fetchOptions,
+          timeoutMs: input.fetchTimeouts.wsTokenRequestMs,
+          phase: "local websocket access issuance",
         }),
       },
     });
@@ -459,54 +474,6 @@ function resolveFetchTimeouts(
   overrides: Partial<LocalManagedFetchTimeouts> | undefined,
 ): LocalManagedFetchTimeouts {
   return { ...DEFAULT_FETCH_TIMEOUTS, ...overrides };
-}
-
-function boundedFetchOptions(input: {
-  readonly options: EnvironmentFetchOptions | undefined;
-  readonly timeoutMs: number;
-  readonly phase: string;
-}): EnvironmentFetchOptions {
-  return {
-    ...input.options,
-    fetch: makeBoundedFetch({
-      fetchImpl: input.options?.fetch,
-      timeoutMs: input.timeoutMs,
-      phase: input.phase,
-    }),
-  };
-}
-
-function makeBoundedFetch(input: {
-  readonly fetchImpl: typeof fetch | undefined;
-  readonly timeoutMs: number;
-  readonly phase: string;
-}): typeof fetch {
-  const boundedFetch = async (url: URL | RequestInfo, init?: RequestInit) => {
-    const fetchImpl = input.fetchImpl ?? globalThis.fetch;
-    if (!fetchImpl) {
-      throw new Error("No fetch implementation is available. Pass fetch explicitly.");
-    }
-    const controller = new AbortController();
-    const signal = init?.signal
-      ? AbortSignal.any([init.signal, controller.signal])
-      : controller.signal;
-    const timeoutError = new Error(`${input.phase} timed out after ${input.timeoutMs}ms.`);
-    const fetchPromise = fetchImpl(url, { ...init, signal });
-    let timeout: ReturnType<typeof setTimeout>;
-    const timeoutPromise = new Promise<never>((_resolve, reject) => {
-      timeout = setTimeout(() => {
-        controller.abort(timeoutError);
-        reject(timeoutError);
-      }, input.timeoutMs);
-      timeout.unref?.();
-    });
-    try {
-      return await Promise.race([fetchPromise, timeoutPromise]);
-    } finally {
-      clearTimeout(timeout!);
-    }
-  };
-  return boundedFetch as typeof fetch;
 }
 
 function resolveTargetWebSocketUrl(target: AttachTarget): Promise<string | URL> | string | URL {
