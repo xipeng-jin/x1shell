@@ -1,6 +1,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, afterEach, describe, expect, vi } from "@effect/vitest";
-import { Effect, FileSystem, Layer, Option } from "effect";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
@@ -34,6 +37,7 @@ describe("AzureDevOpsCli.layer", () => {
       mockRun.mockReturnValueOnce(
         Effect.succeed(
           processOutput(
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
             JSON.stringify({
               pullRequestId: 42,
               title: "Add Azure provider",
@@ -90,6 +94,7 @@ describe("AzureDevOpsCli.layer", () => {
       mockRun.mockReturnValueOnce(
         Effect.succeed(
           processOutput(
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
             JSON.stringify([
               {
                 pullRequestId: 7,
@@ -148,6 +153,7 @@ describe("AzureDevOpsCli.layer", () => {
       mockRun.mockReturnValueOnce(
         Effect.succeed(
           processOutput(
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
             JSON.stringify({
               name: "repo",
               webUrl: "https://dev.azure.com/acme/project/_git/repo",
@@ -197,6 +203,7 @@ describe("AzureDevOpsCli.layer", () => {
       mockRun.mockReturnValueOnce(
         Effect.succeed(
           processOutput(
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
             JSON.stringify({
               name: "repo",
               webUrl: "https://dev.azure.com/acme/project/_git/repo",
@@ -248,6 +255,7 @@ describe("AzureDevOpsCli.layer", () => {
       mockRun.mockReturnValueOnce(
         Effect.succeed(
           processOutput(
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
             JSON.stringify({
               name: "repo",
               webUrl: "https://dev.azure.com/acme/project/_git/repo",
@@ -298,7 +306,7 @@ describe("AzureDevOpsCli.layer", () => {
   it.effect("creates pull requests using the body file as the Azure description", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const bodyFile = `/tmp/t3code-azure-devops-cli-${Date.now()}.md`;
+      const bodyFile = `/tmp/t3code-azure-devops-cli-.md`;
       yield* fileSystem.writeFileString(bodyFile, "Generated body");
       mockRun.mockReturnValueOnce(Effect.succeed(processOutput("{}")));
 

@@ -1,5 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { readdirSync, readFileSync, statSync } from "node:fs";
+// @effect-diagnostics-next-line nodeBuiltinImport:off
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, vi } from "vitest";

@@ -23,7 +23,11 @@ import {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
-import { Effect, Layer, Option, Schema, Struct } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as Struct from "effect/Struct";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
@@ -1006,7 +1010,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects,
                 threads,
-                updatedAt: updatedAt ?? new Date(0).toISOString(),
+                updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               };
 
               return yield* decodeReadModel(snapshot).pipe(
@@ -1205,7 +1209,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 snapshotSequence: computeSnapshotSequence(stateRows),
                 projects,
                 threads,
-                updatedAt: updatedAt ?? new Date(0).toISOString(),
+                updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
               } satisfies OrchestrationReadModel;
             }),
         ),
@@ -1327,7 +1331,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
                   }),
                 ),
-              updatedAt: updatedAt ?? new Date(0).toISOString(),
+              updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
             };
 
             return yield* decodeShellSnapshot(snapshot).pipe(
