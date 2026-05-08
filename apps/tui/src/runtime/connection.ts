@@ -153,6 +153,18 @@ export function createTuiConnectionController(input: {
     void scheduleReconnect({ generation });
   };
 
+  const handleStateApplyError = (generation: number, label: string, error: unknown) => {
+    if (disposed || generation !== connectionGeneration) return;
+    const message = `${label}: ${safeOutputText(String(error))}`;
+    input.store.setConnection("error", message);
+    void disposeCurrent().catch((disposeError) => {
+      input.store.setConnection(
+        "error",
+        `${message}; failed to dispose connection: ${safeOutputText(String(disposeError))}`,
+      );
+    });
+  };
+
   const connectFresh = async (status: "connecting" | "reconnecting") => {
     if (disposed) {
       throw new Error("Connection controller disposed");
@@ -178,6 +190,9 @@ export function createTuiConnectionController(input: {
           input.orchestrationStore?.applyShellItems(items);
           reconcileActiveThreadSubscription(connection, generation);
         },
+        onFlushError: (error) => {
+          handleStateApplyError(generation, "Failed to apply shell state", error);
+        },
       });
       unsubscribeConfig = connection.client.server.subscribeConfig((event) => {
         input.store.applyConfigEvent(event);
@@ -201,13 +216,19 @@ export function createTuiConnectionController(input: {
         if (disposed || current !== connection || generation !== connectionGeneration) {
           return;
         }
-        input.store.applyShellItem(item);
-        shellBatcher?.push(item);
-        if (item.kind === "snapshot") {
-          shellBatcher?.flush();
-          reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
-          input.store.setConnection("connected");
-          firstShellSnapshot.resolve();
+        try {
+          input.store.applyShellItem(item);
+          shellBatcher?.push(item);
+          if (item.kind === "snapshot") {
+            shellBatcher?.flush();
+            reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
+            input.store.setConnection("connected");
+            firstShellSnapshot.resolve();
+          }
+        } catch (error) {
+          const message = `Failed to apply shell state: ${safeOutputText(String(error))}`;
+          firstShellSnapshot.reject(new Error(message));
+          handleStateApplyError(generation, "Failed to apply shell state", error);
         }
       });
       if (activeThreadId) {
@@ -249,15 +270,22 @@ export function createTuiConnectionController(input: {
     threadBatcher?.dispose();
     threadBatcher = createStreamBatcher({
       onFlush: (items) => input.threadDetailStore?.applyThreadItems(threadId, items),
+      onFlushError: (error) => {
+        handleStateApplyError(generation, "Failed to apply thread state", error);
+      },
     });
     unsubscribeThread = connection.client.orchestration.subscribeThread({ threadId }, (item) => {
       if (disposed || current !== connection || generation !== connectionGeneration) return;
-      if (isSnapshotRequiredThreadEvent(item)) {
-        subscribeActiveThread(connection, generation, threadId, { force: true });
-        return;
+      try {
+        if (isSnapshotRequiredThreadEvent(item)) {
+          subscribeActiveThread(connection, generation, threadId, { force: true });
+          return;
+        }
+        threadBatcher?.push(item);
+        if (item.kind === "snapshot") threadBatcher?.flush();
+      } catch (error) {
+        handleStateApplyError(generation, "Failed to apply thread state", error);
       }
-      threadBatcher?.push(item);
-      if (item.kind === "snapshot") threadBatcher?.flush();
     });
   };
 

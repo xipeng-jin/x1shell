@@ -61,7 +61,8 @@ async function runHeadless(
 ): Promise<void> {
   const theme = resolveTheme(config.theme ?? preferences.theme);
   const serverStore = createServerConfigStore();
-  const orchestrationStore = createOrchestrationStore();
+  const launchCwd = process.cwd();
+  const orchestrationStore = createOrchestrationStore({ launchCwd });
   const threadDetailStore = createThreadDetailStore();
   seedHeadlessFixture(process.env, serverStore, orchestrationStore, threadDetailStore);
   const localSupervisor = await maybeStartLocalSupervisor(config, logger).catch((error) => {
@@ -100,6 +101,7 @@ async function runHeadless(
       <App
         interruptRequestToken={0}
         paths={config.paths}
+        launchCwd={launchCwd}
         theme={theme}
         serverStatus={serverStore.getSnapshot()}
         shellState={orchestrationStore.getSnapshot()}
@@ -242,7 +244,8 @@ async function runInteractive(
   let shuttingDown = false;
   const interruptRequestToken = 0;
   const serverStore = createServerConfigStore();
-  const orchestrationStore = createOrchestrationStore();
+  const launchCwd = process.cwd();
+  const orchestrationStore = createOrchestrationStore({ launchCwd });
   const threadDetailStore = createThreadDetailStore();
   const debugBuffer = createDebugBuffer();
   let localSupervisor: LocalManagedSupervisor | null = null;
@@ -309,6 +312,7 @@ async function runInteractive(
       <TuiRuntimeApp
         interruptRequestToken={interruptRequestToken}
         paths={config.paths}
+        launchCwd={launchCwd}
         theme={theme}
         serverStore={serverStore}
         orchestrationStore={orchestrationStore}

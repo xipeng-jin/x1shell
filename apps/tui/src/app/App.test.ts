@@ -53,9 +53,16 @@ describe("App headless smoke", () => {
     expect(frame).toContain("X1Shell");
     expect(frame).toContain("ALPHA");
     expect(frame).toContain("PROJECTS");
-    expect(frame).toContain("Ask for follow-up changes or attach images");
+    expect(frame).toContain("Connecting workspace");
+    expect(frame).toContain("Opening the RPC session");
+    expect(frame).toContain("and waiting for shell");
+    expect(frame).toContain("state.");
+    expect(frame).toContain("New thread [tui]");
+    expect(frame).toContain("Ask anything or @tag files/folders");
+    expect(frame).toContain("▄▄▄   ▄▄▄");
     expect(frame).toContain("GPT-5");
-    expect(frame).toContain("booting workspace");
+    expect(frame).not.toContain("booting workspace");
+    expect(frame).not.toContain("Opening the RPC session...");
     expect(frame).not.toContain("Attach auth required");
     expect(frame).not.toContain("No model");
     expect(frame).not.toContain("Local");
@@ -63,6 +70,40 @@ describe("App headless smoke", () => {
     expect(frame).not.toContain("shell seq");
     expect(frame).not.toContain("X1SHELL_TOKEN");
     expect(frame).not.toContain("help/palette");
+  });
+
+  it("captures a compact logo boot frame on narrow terminals", () => {
+    const dir = createTempDir("x1shell-tui-narrow-");
+    const framePath = join(dir, "frame.txt");
+
+    execFileSync(
+      "bun",
+      [
+        "run",
+        "src/index.tsx",
+        "--headless",
+        "--headless-width=60",
+        "--headless-height=20",
+        `--headless-frame=${framePath}`,
+      ],
+      {
+        cwd: TUI_PACKAGE_DIR,
+        env: {
+          ...process.env,
+          X1SHELL_CONFIG_HOME: join(dir, "config"),
+          X1SHELL_DATA_HOME: join(dir, "data"),
+          X1SHELL_CACHE_HOME: join(dir, "cache"),
+          X1SHELL_STATE_HOME: join(dir, "state"),
+        },
+        stdio: "pipe",
+      },
+    );
+
+    const frame = readFileSync(framePath, "utf8");
+    expect(frame).toContain("New thread [tui]");
+    expect(frame).toContain("X1SHELL");
+    expect(frame).not.toContain("▄▄▄   ▄▄▄");
+    expect(frame).not.toContain("booting workspace");
   });
 
   it("renders shell projects, threads, detail, composer, and sanitized text", () => {

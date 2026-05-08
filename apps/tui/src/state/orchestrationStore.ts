@@ -1,3 +1,4 @@
+import path from "node:path";
 import type {
   ModelSelection,
   OrchestrationProjectShell,
@@ -32,7 +33,12 @@ export interface TuiShellState {
 
 export type TuiShellListener = (state: TuiShellState) => void;
 
-export function createOrchestrationStore(initial?: Partial<TuiShellState>) {
+export function createOrchestrationStore(
+  initial?: Partial<TuiShellState> & { readonly launchCwd?: string },
+) {
+  const launchCwd = initial?.launchCwd;
+  const { launchCwd: _launchCwd, ...initialState } = initial ?? {};
+  let hasAppliedShellSnapshot = false;
   let state: TuiShellState = {
     projects: [],
     threads: [],
@@ -44,7 +50,7 @@ export function createOrchestrationStore(initial?: Partial<TuiShellState>) {
     draftContextByProjectId: {},
     draftAttachmentsByProjectId: {},
     pendingDraftThreadIdByProjectId: {},
-    ...initial,
+    ...initialState,
   };
   const listeners = new Set<TuiShellListener>();
 
@@ -67,13 +73,27 @@ export function createOrchestrationStore(initial?: Partial<TuiShellState>) {
       return () => listeners.delete(listener);
     },
     applyShellItem: (item: OrchestrationShellStreamItem) => {
-      const next = applyShellItem(state, item);
+      const next = applyShellItem(
+        state,
+        item,
+        shellItemOptions(item, launchCwd, hasAppliedShellSnapshot),
+      );
+      if (consumesFirstShellSnapshotPreference(state, item, launchCwd)) {
+        hasAppliedShellSnapshot = true;
+      }
       if (next !== state) setState(next);
     },
     applyShellItems: (items: readonly OrchestrationShellStreamItem[]) => {
       let next = state;
       for (const item of items) {
-        next = applyShellItem(next, item);
+        next = applyShellItem(
+          next,
+          item,
+          shellItemOptions(item, launchCwd, hasAppliedShellSnapshot),
+        );
+        if (consumesFirstShellSnapshotPreference(next, item, launchCwd)) {
+          hasAppliedShellSnapshot = true;
+        }
       }
       if (next !== state) setState(next);
     },
@@ -150,15 +170,33 @@ export function createOrchestrationStore(initial?: Partial<TuiShellState>) {
   };
 }
 
+function isFreshShellSnapshot(
+  state: TuiShellState,
+  item: OrchestrationShellStreamItem,
+): item is Extract<OrchestrationShellStreamItem, { readonly kind: "snapshot" }> {
+  return item.kind === "snapshot" && item.snapshot.snapshotSequence >= state.lastAppliedSequence;
+}
+
+function consumesFirstShellSnapshotPreference(
+  state: TuiShellState,
+  item: OrchestrationShellStreamItem,
+  launchCwd: string | undefined,
+): boolean {
+  if (!isFreshShellSnapshot(state, item)) return false;
+  if (!launchCwd) return true;
+  return item.snapshot.projects.some((project) => safeResolvePath(project.workspaceRoot) !== null);
+}
+
 export function applyShellItem(
   state: TuiShellState,
   item: OrchestrationShellStreamItem,
+  options: { readonly launchCwd?: string; readonly preferLaunchProjectDraft?: boolean } = {},
 ): TuiShellState {
   if (item.kind === "snapshot") {
     if (item.snapshot.snapshotSequence < state.lastAppliedSequence) {
       return state;
     }
-    return fromShellSnapshot(item.snapshot, state);
+    return fromShellSnapshot(item.snapshot, state, options);
   }
   if (item.sequence <= state.lastAppliedSequence) {
     return state;
@@ -234,19 +272,70 @@ export function fromShellSnapshot(
     | "selectedProjectId"
     | "selectedThreadId"
   >,
+  options: { readonly launchCwd?: string; readonly preferLaunchProjectDraft?: boolean } = {},
 ): TuiShellState {
+  const launchProject = findProjectByWorkspaceRoot(snapshot.projects, options.launchCwd);
+  const hasPreviousSelection = previous
+    ? previous.selectedProjectId !== null ||
+      previous.selectedThreadId !== null ||
+      Object.keys(previous.pendingDraftThreadIdByProjectId).length > 0
+    : false;
+  const shouldSelectLaunchDraft = Boolean(
+    launchProject && (options.preferLaunchProjectDraft || !hasPreviousSelection),
+  );
   return normalizeSelection({
     projects: snapshot.projects,
     threads: snapshot.threads,
     updatedAt: snapshot.updatedAt,
     lastAppliedSequence: snapshot.snapshotSequence,
-    selectedProjectId: previous?.selectedProjectId ?? snapshot.projects[0]?.id ?? null,
-    selectedThreadId: previous?.selectedThreadId ?? snapshot.threads[0]?.id ?? null,
+    selectedProjectId: shouldSelectLaunchDraft
+      ? (launchProject?.id ?? null)
+      : previous
+        ? previous.selectedProjectId
+        : (snapshot.projects[0]?.id ?? null),
+    selectedThreadId: shouldSelectLaunchDraft
+      ? null
+      : previous
+        ? previous.selectedThreadId
+        : (snapshot.threads[0]?.id ?? null),
     draftByProjectId: previous?.draftByProjectId ?? {},
     draftContextByProjectId: previous?.draftContextByProjectId ?? {},
     draftAttachmentsByProjectId: previous?.draftAttachmentsByProjectId ?? {},
     pendingDraftThreadIdByProjectId: previous?.pendingDraftThreadIdByProjectId ?? {},
   });
+}
+
+function shellItemOptions(
+  item: OrchestrationShellStreamItem,
+  launchCwd: string | undefined,
+  hasAppliedShellSnapshot: boolean,
+): { readonly launchCwd?: string; readonly preferLaunchProjectDraft?: boolean } {
+  return {
+    ...(launchCwd ? { launchCwd } : {}),
+    ...(item.kind === "snapshot" && !hasAppliedShellSnapshot
+      ? { preferLaunchProjectDraft: true }
+      : {}),
+  };
+}
+
+function findProjectByWorkspaceRoot(
+  projects: readonly OrchestrationProjectShell[],
+  launchCwd: string | undefined,
+): OrchestrationProjectShell | null {
+  const resolvedLaunchCwd = safeResolvePath(launchCwd);
+  if (!resolvedLaunchCwd) return null;
+  return (
+    projects.find((project) => safeResolvePath(project.workspaceRoot) === resolvedLaunchCwd) ?? null
+  );
+}
+
+function safeResolvePath(value: unknown): string | null {
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  try {
+    return path.resolve(value);
+  } catch {
+    return null;
+  }
 }
 
 function normalizeSelection(state: TuiShellState): TuiShellState {

@@ -253,6 +253,84 @@ describe("TUI connection runtime", () => {
     await controller.dispose();
   });
 
+  it("keeps shell application failures inside connection error handling", async () => {
+    const store = createServerConfigStore();
+    const orchestrationStore = {
+      applyShellItems: () => {
+        throw new Error("RpcClientDefect token=shell-secret");
+      },
+      getSnapshot: () => ({ selectedThreadId: null }),
+    };
+    const disposed: number[] = [];
+    const controller = createTuiConnectionController({
+      target: attachTarget(),
+      store,
+      orchestrationStore: orchestrationStore as never,
+      createConnection: () =>
+        fakeConnection({
+          dispose: () => disposed.push(1),
+          shellSnapshot: shellSnapshot(1, "thread-a"),
+        }),
+    });
+
+    await expect(controller.connect()).rejects.toThrow("RpcClientDefect");
+    expect(disposed).toEqual([1]);
+    expect(store.getSnapshot()).toMatchObject({
+      connection: "error",
+    });
+    expect(store.getSnapshot().error).toContain("Failed to apply shell state");
+    expect(store.getSnapshot().error).not.toContain("shell-secret");
+
+    await controller.dispose();
+    expect(disposed).toEqual([1]);
+  });
+
+  it("contains delayed shell batch application failures from timer flushes", async () => {
+    const store = createServerConfigStore();
+    const orchestrationStore = {
+      applyShellItems: vi.fn((items: readonly unknown[]) => {
+        if (items.some((item) => (item as { kind?: string }).kind !== "snapshot")) {
+          throw new Error("RpcClientDefect token=delayed-shell-secret");
+        }
+      }),
+      getSnapshot: () => ({ selectedThreadId: null }),
+    };
+    const disposed: number[] = [];
+    let shellListener: ((item: unknown) => void) | undefined;
+    const controller = createTuiConnectionController({
+      target: attachTarget(),
+      store,
+      orchestrationStore: orchestrationStore as never,
+      createConnection: () =>
+        fakeConnection({
+          dispose: () => disposed.push(1),
+          shellSnapshot: shellSnapshot(1, "thread-a"),
+          subscribeShell: (listener) => {
+            shellListener = listener;
+            listener({ kind: "snapshot", snapshot: shellSnapshot(1, "thread-a") });
+            return () => undefined;
+          },
+        }),
+    });
+
+    await controller.connect();
+    shellListener?.({
+      kind: "thread-upserted",
+      sequence: 2,
+      thread: { id: "thread-b" },
+    });
+
+    await waitFor(() => {
+      expect(store.getSnapshot().connection).toBe("error");
+    });
+    expect(store.getSnapshot().error).toContain("Failed to apply shell state");
+    expect(store.getSnapshot().error).not.toContain("delayed-shell-secret");
+    expect(disposed).toEqual([1]);
+
+    await controller.dispose();
+    expect(disposed).toEqual([1]);
+  });
+
   it("disposes partially-created connections when setup fails", async () => {
     const store = createServerConfigStore();
     const disposed: number[] = [];

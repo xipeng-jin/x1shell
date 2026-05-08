@@ -36,6 +36,7 @@ try {
         logFile: "/tmp/x1shell/tui.log",
         headlessFrameFile: "/tmp/x1shell/frame.txt",
       },
+      launchCwd: "/tmp/x1shell",
       theme: resolveTheme(undefined),
       serverStore,
       orchestrationStore,
