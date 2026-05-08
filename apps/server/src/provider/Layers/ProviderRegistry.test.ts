@@ -27,6 +27,7 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { deepMerge } from "@t3tools/shared/Struct";
 import { createModelCapabilities } from "@t3tools/shared/model";
+import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 
 import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from "./CodexProvider.ts";
 import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
@@ -51,6 +52,8 @@ import {
   makeProviderMaintenanceCapabilities,
 } from "../providerMaintenance.ts";
 const decodeServerSettings = Schema.decodeSync(ServerSettings);
+const encodeServerSettings = Schema.encodeSync(ServerSettings);
+const encodedDefaultServerSettings = encodeServerSettings(DEFAULT_SERVER_SETTINGS);
 
 const defaultClaudeSettings: ClaudeSettings = Schema.decodeSync(ClaudeSettings)({});
 const defaultCodexSettings: CodexSettings = Schema.decodeSync(CodexSettings)({});
@@ -259,7 +262,8 @@ function makeMutableServerSettingsService(
       updateSettings: (patch) =>
         Effect.gen(function* () {
           const current = yield* Ref.get(settingsRef);
-          const next = decodeServerSettings(deepMerge(current, patch));
+          const next = applyServerSettingsPatch(current, patch);
+          encodeServerSettings(next);
           yield* Ref.set(settingsRef, next);
           yield* PubSub.publish(changes, next);
           return next;
@@ -1109,7 +1113,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           const missingBinary = `t3code_codex_missing_`;
           const serverSettings = yield* makeMutableServerSettingsService(
             decodeServerSettings(
-              deepMerge(DEFAULT_SERVER_SETTINGS, {
+              deepMerge(encodedDefaultServerSettings, {
                 providers: {
                   // Disable every built-in probe that would otherwise spawn
                   // on the CI host. `enabled: false` short-circuits each
@@ -1208,7 +1212,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           const secondMissing = `t3code_codex_second_`;
           const serverSettings = yield* makeMutableServerSettingsService(
             decodeServerSettings(
-              deepMerge(DEFAULT_SERVER_SETTINGS, {
+              deepMerge(encodedDefaultServerSettings, {
                 providers: {
                   codex: { enabled: true, binaryPath: firstMissing },
                   claudeAgent: { enabled: false },
@@ -1303,7 +1307,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
         Effect.gen(function* () {
           const serverSettings = yield* makeMutableServerSettingsService(
             decodeServerSettings(
-              deepMerge(DEFAULT_SERVER_SETTINGS, {
+              deepMerge(encodedDefaultServerSettings, {
                 providers: {
                   codex: { enabled: false },
                   claudeAgent: { enabled: false },
@@ -1359,7 +1363,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           Effect.gen(function* () {
             const serverSettings = yield* makeMutableServerSettingsService(
               decodeServerSettings(
-                deepMerge(DEFAULT_SERVER_SETTINGS, {
+                deepMerge(encodedDefaultServerSettings, {
                   providers: {
                     claudeAgent: {
                       enabled: false,
