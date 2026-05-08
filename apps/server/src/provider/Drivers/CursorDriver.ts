@@ -44,6 +44,7 @@ import {
   makeSelfUpdateProviderMaintenanceResolver,
   resolveProviderMaintenanceCapabilitiesEffect,
 } from "../providerMaintenance.ts";
+const decodeCursorSettings = Schema.decodeSync(CursorSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("cursor");
 const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
@@ -86,7 +87,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
     supportsMultipleInstances: true,
   },
   configSchema: CursorSettings,
-  defaultConfig: (): CursorSettings => Schema.decodeSync(CursorSettings)({}),
+  defaultConfig: (): CursorSettings => decodeCursorSettings({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;

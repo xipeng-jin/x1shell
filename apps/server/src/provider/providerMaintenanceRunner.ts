@@ -27,6 +27,7 @@ import {
 } from "./providerMaintenanceCommandCoordinator.ts";
 import { enrichProviderSnapshotWithVersionAdvisory } from "./providerMaintenance.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
+const isServerProviderUpdateError = Schema.is(ServerProviderUpdateError);
 
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
 const UPDATE_OUTPUT_MAX_BYTES = 10_000;
@@ -405,7 +406,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
       })
       .pipe(
         Effect.mapError((error) =>
-          Schema.is(ServerProviderUpdateError)(error)
+          isServerProviderUpdateError(error)
             ? new ServerProviderUpdateError({
                 provider,
                 reason: error.reason,

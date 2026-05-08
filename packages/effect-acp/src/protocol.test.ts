@@ -42,6 +42,13 @@ const RequestPermissionResponse = jsonRpcResponse(AcpSchema.RequestPermissionRes
 const ExtRequest = jsonRpcRequest("x/test", Schema.Struct({ hello: Schema.String }));
 const ExtResponse = jsonRpcResponse(Schema.Struct({ ok: Schema.Boolean }));
 
+const decodeSessionCancelNotification = Schema.decodeEffect(
+  Schema.fromJsonString(SessionCancelNotification),
+);
+const decodeExtRequest = Schema.decodeEffect(Schema.fromJsonString(ExtRequest));
+const decodeRequestPermissionResponse = Schema.decodeEffect(
+  Schema.fromJsonString(RequestPermissionResponse),
+);
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/acp-mock-peer.ts"),
 );
@@ -80,16 +87,13 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
 
         yield* transport.notify("session/cancel", { sessionId: "session-1" });
         const outbound = yield* Queue.take(output);
-        assert.deepEqual(
-          yield* Schema.decodeEffect(Schema.fromJsonString(SessionCancelNotification))(outbound),
-          {
-            jsonrpc: "2.0",
-            method: "session/cancel",
-            params: {
-              sessionId: "session-1",
-            },
+        assert.deepEqual(yield* decodeSessionCancelNotification(outbound), {
+          jsonrpc: "2.0",
+          method: "session/cancel",
+          params: {
+            sessionId: "session-1",
           },
-        );
+        });
 
         yield* Queue.offer(
           input,
@@ -201,7 +205,7 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
         .request("x/test", { hello: "world" })
         .pipe(Effect.forkScoped);
       const outbound = yield* Queue.take(output);
-      assert.deepEqual(yield* Schema.decodeEffect(Schema.fromJsonString(ExtRequest))(outbound), {
+      assert.deepEqual(yield* decodeExtRequest(outbound), {
         jsonrpc: "2.0",
         id: 1,
         method: "x/test",
@@ -289,19 +293,16 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
       });
 
       const outbound = yield* Queue.take(output);
-      assert.deepEqual(
-        yield* Schema.decodeEffect(Schema.fromJsonString(RequestPermissionResponse))(outbound),
-        {
-          jsonrpc: "2.0",
-          id: 0,
-          result: {
-            outcome: {
-              outcome: "selected",
-              optionId: "allow",
-            },
+      assert.deepEqual(yield* decodeRequestPermissionResponse(outbound), {
+        jsonrpc: "2.0",
+        id: 0,
+        result: {
+          outcome: {
+            outcome: "selected",
+            optionId: "allow",
           },
         },
-      );
+      });
     }),
   );
 
@@ -322,7 +323,7 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
         .request("x/test", { hello: "world" })
         .pipe(Effect.forkScoped);
       const outbound = yield* Queue.take(output);
-      assert.deepEqual(yield* Schema.decodeEffect(Schema.fromJsonString(ExtRequest))(outbound), {
+      assert.deepEqual(yield* decodeExtRequest(outbound), {
         jsonrpc: "2.0",
         id: 1,
         method: "x/test",
