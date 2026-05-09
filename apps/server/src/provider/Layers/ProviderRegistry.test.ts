@@ -1363,10 +1363,16 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
               Schema.decodeSync(ServerSettings)(
                 deepMerge(DEFAULT_SERVER_SETTINGS, {
                   providers: {
+                    claudeAgent: {
+                      enabled: false,
+                    },
                     codex: {
                       enabled: false,
                     },
                     cursor: {
+                      enabled: false,
+                    },
+                    opencode: {
                       enabled: false,
                     },
                   },
