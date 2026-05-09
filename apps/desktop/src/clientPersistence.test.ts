@@ -63,7 +63,6 @@ const clientSettings: ClientSettings = {
   },
   sidebarProjectSortOrder: "manual",
   sidebarThreadSortOrder: "created_at",
-  sidebarThreadPreviewCount: 6,
   timestampFormat: "24-hour",
 };
 

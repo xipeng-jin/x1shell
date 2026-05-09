@@ -3,7 +3,7 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
 } from "@t3tools/contracts";
-import { DateTime, Effect } from "effect";
+import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
@@ -17,7 +17,17 @@ import {
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
 
-const currentIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
+const nowIso = () => new Date().toISOString();
+const defaultMetadata: Omit<OrchestrationEvent, "sequence" | "type" | "payload"> = {
+  eventId: crypto.randomUUID() as OrchestrationEvent["eventId"],
+  aggregateKind: "thread",
+  aggregateId: "" as OrchestrationEvent["aggregateId"],
+  occurredAt: nowIso(),
+  commandId: null,
+  causationEventId: null,
+  correlationId: null,
+  metadata: {},
+};
 
 function withEventBase(
   input: Pick<OrchestrationCommand, "commandId"> & {
@@ -28,12 +38,12 @@ function withEventBase(
   },
 ): Omit<OrchestrationEvent, "sequence" | "type" | "payload"> {
   return {
+    ...defaultMetadata,
     eventId: crypto.randomUUID() as OrchestrationEvent["eventId"],
     aggregateKind: input.aggregateKind,
     aggregateId: input.aggregateId,
     occurredAt: input.occurredAt,
     commandId: input.commandId,
-    causationEventId: null,
     correlationId: input.commandId,
     metadata: input.metadata ?? {},
   };
@@ -116,7 +126,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
-      const occurredAt = yield* currentIso;
+      const occurredAt = nowIso();
       return {
         ...withEventBase({
           aggregateKind: "project",
@@ -173,7 +183,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
 
-      const occurredAt = yield* currentIso;
+      const occurredAt = nowIso();
       return {
         ...withEventBase({
           aggregateKind: "project",
@@ -229,7 +239,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      const occurredAt = yield* currentIso;
+      const occurredAt = nowIso();
       return {
         ...withEventBase({
           aggregateKind: "thread",
@@ -251,7 +261,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      const occurredAt = yield* currentIso;
+      const occurredAt = nowIso();
       return {
         ...withEventBase({
           aggregateKind: "thread",
@@ -274,7 +284,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      const occurredAt = yield* currentIso;
+      const occurredAt = nowIso();
       return {
         ...withEventBase({
           aggregateKind: "thread",
@@ -296,7 +306,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      const occurredAt = yield* currentIso;
+      const occurredAt = nowIso();
       return {
         ...withEventBase({
           aggregateKind: "thread",
@@ -324,7 +334,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      const occurredAt = yield* currentIso;
+      const occurredAt = nowIso();
       return {
         ...withEventBase({
           aggregateKind: "thread",
@@ -347,7 +357,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      const occurredAt = yield* currentIso;
+      const occurredAt = nowIso();
       return {
         ...withEventBase({
           aggregateKind: "thread",

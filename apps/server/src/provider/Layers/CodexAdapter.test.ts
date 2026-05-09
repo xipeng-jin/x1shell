@@ -452,7 +452,6 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         turnId: asTurnId("turn-1"),
         itemId: asItemId("msg_1"),
         payload: {
-          completedAtMs: 1_778_000_000_000,
           threadId: "thread-1",
           turnId: "turn-1",
           item: {
@@ -495,7 +494,6 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         turnId: asTurnId("turn-1"),
         itemId: asItemId("plan_1"),
         payload: {
-          completedAtMs: 1_778_000_000_000,
           threadId: "thread-1",
           turnId: "turn-1",
           item: {
@@ -659,40 +657,6 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         firstEvent.value.payload.message,
         "The filename or extension is too long. (os error 206)",
       );
-    }),
-  );
-
-  it.effect("maps realtime started notifications with upstream realtime session ids", () =>
-    Effect.gen(function* () {
-      const { adapter, runtime } = yield* startLifecycleRuntime();
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
-
-      yield* runtime.emit({
-        id: asEventId("evt-realtime-started"),
-        kind: "notification",
-        provider: ProviderDriverKind.make("codex"),
-        threadId: asThreadId("thread-1"),
-        createdAt: new Date().toISOString(),
-        method: "thread/realtime/started",
-        payload: {
-          threadId: "thread-1",
-          realtimeSessionId: "realtime-session-1",
-          version: "v2",
-        },
-      } satisfies ProviderEvent);
-
-      const firstEvent = yield* Fiber.join(firstEventFiber);
-
-      assert.equal(firstEvent._tag, "Some");
-      if (firstEvent._tag !== "Some") {
-        return;
-      }
-      assert.equal(firstEvent.value.type, "thread.realtime.started");
-      if (firstEvent.value.type !== "thread.realtime.started") {
-        return;
-      }
-      assert.equal(firstEvent.value.threadId, "thread-1");
-      assert.equal(firstEvent.value.payload.realtimeSessionId, "realtime-session-1");
     }),
   );
 

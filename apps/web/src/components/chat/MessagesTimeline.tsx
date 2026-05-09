@@ -1,9 +1,4 @@
-import {
-  type EnvironmentId,
-  type MessageId,
-  type ServerProviderSkill,
-  type TurnId,
-} from "@t3tools/contracts";
+import { type EnvironmentId, type MessageId, type TurnId } from "@t3tools/contracts";
 import {
   createContext,
   memo,
@@ -65,7 +60,6 @@ import {
   formatInlineTerminalContextLabel,
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
-import { SkillInlineText } from "./SkillInlineText";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 
 // ---------------------------------------------------------------------------
@@ -81,7 +75,6 @@ interface TimelineRowSharedState {
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   workspaceRoot: string | undefined;
-  skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -100,7 +93,6 @@ const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
-const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -127,7 +119,6 @@ interface MessagesTimelineProps {
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
-  skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
 }
 
@@ -156,7 +147,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   resolvedTheme,
   timestampFormat,
   workspaceRoot,
-  skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
 }: MessagesTimelineProps) {
   const rawRows = useMemo(
@@ -212,7 +202,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       markdownCwd,
       resolvedTheme,
       workspaceRoot,
-      skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
       onImageExpand,
@@ -224,7 +213,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       markdownCwd,
       resolvedTheme,
       workspaceRoot,
-      skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
       onImageExpand,
@@ -246,7 +234,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // from TimelineRowCtx, which propagates through LegendList's memo.
   const renderItem = useCallback(
     ({ item }: { item: MessagesTimelineRow }) => (
-      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-clip" data-timeline-root="true">
+      <div className="mx-auto w-full min-w-0 max-w-3xl overflow-x-hidden" data-timeline-root="true">
         <TimelineRowContent row={item} />
       </div>
     ),
@@ -369,7 +357,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           <UserMessageBody
             text={displayedUserMessage.visibleText}
             terminalContexts={terminalContexts}
-            skills={ctx.skills}
           />
         )}
         <div className="mt-1.5 flex items-center justify-end gap-2">
@@ -418,7 +405,6 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           text={messageText}
           cwd={ctx.markdownCwd}
           isStreaming={Boolean(row.message.streaming)}
-          skills={ctx.skills}
         />
         <AssistantChangedFilesSection
           turnSummary={row.assistantTurnDiffSummary}
@@ -534,27 +520,19 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
 }
 
 // ---------------------------------------------------------------------------
-// Self-ticking labels — update their own text nodes so elapsed-time display
-// does not create a React commit every second while a response is streaming.
+// Self-ticking components — bypass LegendList memoisation entirely.
+// Each owns a `nowMs` state value consumed in the render output so the
+// React Compiler cannot elide the re-render as a no-op.
 // ---------------------------------------------------------------------------
 
 /** Live "Working for Xs" label. */
 function WorkingTimer({ createdAt }: { createdAt: string }) {
-  const textRef = useRef<HTMLSpanElement>(null);
-  const initialText = formatWorkingTimerNow(createdAt);
-
+  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    const updateText = () => {
-      if (textRef.current) {
-        textRef.current.textContent = formatWorkingTimerNow(createdAt);
-      }
-    };
-    updateText();
-    const id = setInterval(updateText, 1000);
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, [createdAt]);
-
-  return <span ref={textRef}>{initialText}</span>;
+  return <>{formatWorkingTimer(createdAt, new Date(nowMs).toISOString()) ?? "0s"}</>;
 }
 
 /** Live timestamp + elapsed duration for a streaming assistant message. */
@@ -567,28 +545,15 @@ function LiveMessageMeta({
   durationStart: string | null | undefined;
   timestampFormat: TimestampFormat;
 }) {
-  const textRef = useRef<HTMLSpanElement>(null);
-  const initialText = formatLiveMessageMetaNow(createdAt, durationStart, timestampFormat);
-
+  const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    const updateText = () => {
-      if (textRef.current) {
-        textRef.current.textContent = formatLiveMessageMetaNow(
-          createdAt,
-          durationStart,
-          timestampFormat,
-        );
-      }
-    };
-    updateText();
-    if (!durationStart) {
-      return;
-    }
-    const id = setInterval(updateText, 1000);
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [createdAt, durationStart, timestampFormat]);
-
-  return <span ref={textRef}>{initialText}</span>;
+  }, [durationStart]);
+  const elapsed = durationStart
+    ? formatElapsed(durationStart, new Date(nowMs).toISOString())
+    : null;
+  return <>{formatMessageMeta(createdAt, elapsed, timestampFormat)}</>;
 }
 
 // ---------------------------------------------------------------------------
@@ -698,7 +663,7 @@ function AssistantChangedFilesSectionInner({
 
   return (
     <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
-      <div className="sticky top-2 z-10 mb-1.5 flex items-center justify-between gap-2 bg-background before:absolute before:inset-x-0 before:-top-2 before:h-2 before:bg-background before:content-['']">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
         <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
           <span>Changed files ({changedFileCountLabel})</span>
           {hasNonZeroStat(summaryStat) && (
@@ -758,7 +723,6 @@ const UserMessageTerminalContextInlineLabel = memo(
 const UserMessageBody = memo(function UserMessageBody(props: {
   text: string;
   terminalContexts: ParsedTerminalContextEntry[];
-  skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
 }) {
   if (props.terminalContexts.length > 0) {
     const hasEmbeddedInlineLabels = textContainsInlineTerminalContextLabels(
@@ -781,7 +745,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         if (matchIndex > cursor) {
           inlineNodes.push(
             <span key={`user-terminal-context-inline-before:${context.header}:${cursor}`}>
-              <SkillInlineText text={props.text.slice(cursor, matchIndex)} skills={props.skills} />
+              {props.text.slice(cursor, matchIndex)}
             </span>,
           );
         }
@@ -798,7 +762,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         if (cursor < props.text.length) {
           inlineNodes.push(
             <span key={`user-message-terminal-context-inline-rest:${cursor}`}>
-              <SkillInlineText text={props.text.slice(cursor)} skills={props.skills} />
+              {props.text.slice(cursor)}
             </span>,
           );
         }
@@ -826,11 +790,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     }
 
     if (props.text.length > 0) {
-      inlineNodes.push(
-        <span key="user-message-terminal-context-inline-text">
-          <SkillInlineText text={props.text} skills={props.skills} />
-        </span>,
-      );
+      inlineNodes.push(<span key="user-message-terminal-context-inline-text">{props.text}</span>);
     } else if (inlinePrefix.length === 0) {
       return null;
     }
@@ -848,7 +808,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
 
   return (
     <div className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-foreground">
-      <SkillInlineText text={props.text} skills={props.skills} />
+      {props.text}
     </div>
   );
 });
@@ -898,19 +858,6 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
   }
 
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
-}
-
-function formatWorkingTimerNow(startIso: string): string {
-  return formatWorkingTimer(startIso, new Date().toISOString()) ?? "0s";
-}
-
-function formatLiveMessageMetaNow(
-  createdAt: string,
-  durationStart: string | null | undefined,
-  timestampFormat: TimestampFormat,
-): string {
-  const elapsed = durationStart ? formatElapsed(durationStart, new Date().toISOString()) : null;
-  return formatMessageMeta(createdAt, elapsed, timestampFormat);
 }
 
 function formatMessageMeta(
