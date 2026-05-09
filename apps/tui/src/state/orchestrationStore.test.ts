@@ -146,6 +146,213 @@ describe("TUI shell orchestration store", () => {
     });
   });
 
+  it("selects a launch-cwd project draft on the first matching shell snapshot", () => {
+    const store = createOrchestrationStore({ launchCwd: "/repo/project-b" });
+    store.applyShellItem({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 1,
+        updatedAt: "2026-04-28T00:00:00.000Z",
+        projects: [
+          projectShell("project-a", "/repo/project-a"),
+          projectShell("project-b", "/repo/project-b"),
+        ],
+        threads: [
+          threadShell("thread-a", "project-a", "Thread A"),
+          threadShell("thread-b", "project-b", "Thread B"),
+        ],
+      },
+    });
+
+    expect(store.getSnapshot()).toMatchObject({
+      selectedProjectId: "project-b",
+      selectedThreadId: null,
+    });
+  });
+
+  it("still prefers the launch-cwd project when live shell events arrive before the first snapshot", () => {
+    const store = createOrchestrationStore({ launchCwd: "/repo/project-b" });
+    store.applyShellItem({
+      kind: "thread-upserted",
+      sequence: 1,
+      thread: threadShell("thread-a", "project-a", "Thread A"),
+    });
+    store.applyShellItem({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 2,
+        updatedAt: "2026-04-28T00:00:00.000Z",
+        projects: [
+          projectShell("project-a", "/repo/project-a"),
+          projectShell("project-b", "/repo/project-b"),
+        ],
+        threads: [
+          threadShell("thread-a", "project-a", "Thread A"),
+          threadShell("thread-b", "project-b", "Thread B"),
+        ],
+      },
+    });
+
+    expect(store.getSnapshot()).toMatchObject({
+      selectedProjectId: "project-b",
+      selectedThreadId: null,
+    });
+  });
+
+  it("does not let a stale snapshot consume launch-cwd first-snapshot preference", () => {
+    const store = createOrchestrationStore({ launchCwd: "/repo/project-b" });
+    store.applyShellItem({
+      kind: "thread-upserted",
+      sequence: 5,
+      thread: threadShell("thread-a", "project-a", "Thread A"),
+    });
+    store.applyShellItem({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 4,
+        updatedAt: "2026-04-28T00:00:00.000Z",
+        projects: [projectShell("project-a", "/repo/project-a")],
+        threads: [threadShell("thread-a", "project-a", "Thread A")],
+      },
+    });
+    store.applyShellItem({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 6,
+        updatedAt: "2026-04-28T00:00:01.000Z",
+        projects: [
+          projectShell("project-a", "/repo/project-a"),
+          projectShell("project-b", "/repo/project-b"),
+        ],
+        threads: [
+          threadShell("thread-a", "project-a", "Thread A"),
+          threadShell("thread-b", "project-b", "Thread B"),
+        ],
+      },
+    });
+
+    expect(store.getSnapshot()).toMatchObject({
+      selectedProjectId: "project-b",
+      selectedThreadId: null,
+    });
+  });
+
+  it("skips invalid workspace roots while matching the launch cwd", () => {
+    const store = createOrchestrationStore({ launchCwd: "/repo/project-b" });
+    store.applyShellItem({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 1,
+        updatedAt: "2026-04-28T00:00:00.000Z",
+        projects: [projectShell("project-a", null), projectShell("project-b", "/repo/project-b")],
+        threads: [
+          threadShell("thread-a", "project-a", "Thread A"),
+          threadShell("thread-b", "project-b", "Thread B"),
+        ],
+      },
+    });
+
+    expect(store.getSnapshot()).toMatchObject({
+      selectedProjectId: "project-b",
+      selectedThreadId: null,
+    });
+  });
+
+  it("does not throw or consume launch-cwd preference when an early snapshot has invalid roots", () => {
+    const store = createOrchestrationStore({ launchCwd: "/repo/project-b" });
+
+    expect(() =>
+      store.applyShellItem({
+        kind: "snapshot",
+        snapshot: {
+          snapshotSequence: 1,
+          updatedAt: "2026-04-28T00:00:00.000Z",
+          projects: [projectShell("project-a", null)],
+          threads: [threadShell("thread-a", "project-a", "Thread A")],
+        },
+      }),
+    ).not.toThrow();
+
+    store.applyShellItem({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 2,
+        updatedAt: "2026-04-28T00:00:01.000Z",
+        projects: [projectShell("project-a", null), projectShell("project-b", "/repo/project-b")],
+        threads: [
+          threadShell("thread-a", "project-a", "Thread A"),
+          threadShell("thread-b", "project-b", "Thread B"),
+        ],
+      },
+    });
+
+    expect(store.getSnapshot()).toMatchObject({
+      selectedProjectId: "project-b",
+      selectedThreadId: null,
+    });
+  });
+
+  it("does not reapply launch-cwd preference after the first shell snapshot", () => {
+    const store = createOrchestrationStore({ launchCwd: "/repo/project-b" });
+    store.applyShellItem({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 1,
+        updatedAt: "2026-04-28T00:00:00.000Z",
+        projects: [
+          projectShell("project-a", "/repo/project-a"),
+          projectShell("project-b", "/repo/project-b"),
+        ],
+        threads: [
+          threadShell("thread-a", "project-a", "Thread A"),
+          threadShell("thread-b", "project-b", "Thread B"),
+        ],
+      },
+    });
+    store.selectThread("thread-a" as never);
+    store.applyShellItem({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 2,
+        updatedAt: "2026-04-28T00:00:01.000Z",
+        projects: [
+          projectShell("project-a", "/repo/project-a"),
+          projectShell("project-b", "/repo/project-b"),
+        ],
+        threads: [
+          threadShell("thread-a", "project-a", "Thread A"),
+          threadShell("thread-b", "project-b", "Thread B"),
+        ],
+      },
+    });
+
+    expect(store.getSnapshot()).toMatchObject({
+      selectedProjectId: "project-a",
+      selectedThreadId: "thread-a",
+    });
+  });
+
+  it("falls back to the first project and thread when no project matches launch cwd", () => {
+    const store = createOrchestrationStore({ launchCwd: "/repo/missing" });
+    store.applyShellItem({ kind: "snapshot", snapshot: shellSnapshot(1, ["thread-a"]) });
+
+    expect(store.getSnapshot()).toMatchObject({
+      selectedProjectId: "project-a",
+      selectedThreadId: "thread-a",
+    });
+  });
+
+  it("preserves a launch project draft across later snapshots", () => {
+    const store = createOrchestrationStore({ launchCwd: "/repo/project" });
+    store.applyShellItem({ kind: "snapshot", snapshot: shellSnapshot(1, ["thread-a"]) });
+    store.applyShellItem({ kind: "snapshot", snapshot: shellSnapshot(2, ["thread-b"]) });
+
+    expect(store.getSnapshot()).toMatchObject({
+      selectedProjectId: "project-a",
+      selectedThreadId: null,
+    });
+  });
+
   it("does not let live thread upserts steal an explicit new-thread draft selection", () => {
     const store = createOrchestrationStore();
     store.applyShellItem({ kind: "snapshot", snapshot: shellSnapshot(1, ["thread-a"]) });
@@ -228,11 +435,11 @@ function shellSnapshot(sequence: number, threadIds: string[]) {
   } satisfies Extract<OrchestrationShellStreamItem, { kind: "snapshot" }>["snapshot"];
 }
 
-function projectShell(id: string) {
+function projectShell(id: string, workspaceRoot: unknown = "/repo/project") {
   return {
     id,
     title: "Project",
-    workspaceRoot: "/repo/project",
+    workspaceRoot,
     defaultModelSelection: { instanceId: "codex", model: "gpt-5" },
     scripts: [],
     createdAt: "2026-04-28T00:00:00.000Z",

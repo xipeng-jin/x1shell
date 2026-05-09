@@ -1,11 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   type ProjectId,
   type UploadChatAttachment,
 } from "@t3tools/contracts";
+import { displayText } from "../domain/display.js";
 import { describe, expect, it } from "vitest";
 import {
   canAppendComposerAttachment,
@@ -15,6 +17,8 @@ import {
   isPlainTextSequence,
   parseComposerAttachmentInput,
 } from "./input.js";
+
+const TUI_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 describe("App headless smoke", () => {
   it("captures a static boot frame", () => {
@@ -32,7 +36,7 @@ describe("App headless smoke", () => {
         `--headless-frame=${framePath}`,
       ],
       {
-        cwd: process.cwd(),
+        cwd: TUI_PACKAGE_DIR,
         env: {
           ...process.env,
           X1SHELL_CONFIG_HOME: join(dir, "X1SHELL_TOKEN=secret", "config"),
@@ -49,9 +53,16 @@ describe("App headless smoke", () => {
     expect(frame).toContain("X1Shell");
     expect(frame).toContain("ALPHA");
     expect(frame).toContain("PROJECTS");
-    expect(frame).toContain("Ask for follow-up changes or attach images");
+    expect(frame).toContain("Connecting workspace");
+    expect(frame).toContain("Opening the RPC session");
+    expect(frame).toContain("and waiting for shell");
+    expect(frame).toContain("state.");
+    expect(frame).toContain("New thread [tui]");
+    expect(frame).toContain("Ask anything or @tag files/folders");
+    expect(frame).toContain("▄▄▄   ▄▄▄");
     expect(frame).toContain("GPT-5");
-    expect(frame).toContain("booting workspace");
+    expect(frame).not.toContain("booting workspace");
+    expect(frame).not.toContain("Opening the RPC session...");
     expect(frame).not.toContain("Attach auth required");
     expect(frame).not.toContain("No model");
     expect(frame).not.toContain("Local");
@@ -59,6 +70,40 @@ describe("App headless smoke", () => {
     expect(frame).not.toContain("shell seq");
     expect(frame).not.toContain("X1SHELL_TOKEN");
     expect(frame).not.toContain("help/palette");
+  });
+
+  it("captures a compact logo boot frame on narrow terminals", () => {
+    const dir = createTempDir("x1shell-tui-narrow-");
+    const framePath = join(dir, "frame.txt");
+
+    execFileSync(
+      "bun",
+      [
+        "run",
+        "src/index.tsx",
+        "--headless",
+        "--headless-width=60",
+        "--headless-height=20",
+        `--headless-frame=${framePath}`,
+      ],
+      {
+        cwd: TUI_PACKAGE_DIR,
+        env: {
+          ...process.env,
+          X1SHELL_CONFIG_HOME: join(dir, "config"),
+          X1SHELL_DATA_HOME: join(dir, "data"),
+          X1SHELL_CACHE_HOME: join(dir, "cache"),
+          X1SHELL_STATE_HOME: join(dir, "state"),
+        },
+        stdio: "pipe",
+      },
+    );
+
+    const frame = readFileSync(framePath, "utf8");
+    expect(frame).toContain("New thread [tui]");
+    expect(frame).toContain("X1SHELL");
+    expect(frame).not.toContain("▄▄▄   ▄▄▄");
+    expect(frame).not.toContain("booting workspace");
   });
 
   it("renders shell projects, threads, detail, composer, and sanitized text", () => {
@@ -76,7 +121,7 @@ describe("App headless smoke", () => {
         `--headless-frame=${framePath}`,
       ],
       {
-        cwd: process.cwd(),
+        cwd: TUI_PACKAGE_DIR,
         env: {
           ...process.env,
           X1SHELL_HEADLESS_FIXTURE: "1",
@@ -185,6 +230,20 @@ describe("App headless smoke", () => {
       canAppendComposerAttachment(Array(PROVIDER_SEND_TURN_MAX_ATTACHMENTS).fill(attachment)),
     ).toBe(false);
     expect(composerAttachmentLimitMessage()).toContain(String(PROVIDER_SEND_TURN_MAX_ATTACHMENTS));
+  });
+
+  it("formats async action failures for submit error display without preserving controls", () => {
+    const message = displayText(
+      String(
+        new Error("RpcClientDefect token=submit-secret \u001b]8;;https://evil.example\u0007link"),
+      ),
+    );
+
+    expect(message).toContain("RpcClientDefect");
+    expect(message).toContain("link");
+    expect(message).not.toContain("\u001b]8");
+    expect(message).not.toContain("evil.example");
+    expect(message).not.toContain("submit-secret");
   });
 });
 

@@ -11,6 +11,7 @@ import type { TuiTheme } from "../terminal/theme.js";
 export function TuiRuntimeApp(props: {
   interruptRequestToken: number;
   paths: TuiPaths;
+  launchCwd: string;
   theme: TuiTheme;
   serverStore: ReturnType<typeof createServerConfigStore>;
   orchestrationStore: ReturnType<typeof createOrchestrationStore>;
@@ -54,6 +55,7 @@ export function TuiRuntimeApp(props: {
     <App
       interruptRequestToken={props.interruptRequestToken}
       paths={props.paths}
+      launchCwd={props.launchCwd}
       theme={props.theme}
       serverStatus={serverStatus}
       shellState={shellState}

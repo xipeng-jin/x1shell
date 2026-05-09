@@ -1,8 +1,7 @@
-import { execFile } from "node:child_process";
+import { execFile, type ChildProcess } from "node:child_process";
 import { constants } from "node:fs";
 import { access, readFile, rm } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
 import type { ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import {
   bootstrapBearerSession,
@@ -12,9 +11,9 @@ import {
   type EnvironmentFetchOptions,
 } from "@t3tools/client-runtime/environment";
 import type { WsRpcProtocolSocketUrlProvider } from "@t3tools/client-runtime/ws";
+import { BoundedFetchTimeoutError } from "./boundedFetch.js";
 import { redactText, redactUnknown } from "./redaction.js";
 
-const execFileAsync = promisify(execFile);
 const MIN_COMPATIBLE_VERSION = "0.0.21";
 
 export interface AttachTarget {
@@ -28,6 +27,10 @@ export interface AttachTarget {
 
 export interface AttachRuntimeOptions {
   readonly fetchOptions?: EnvironmentFetchOptions;
+  readonly descriptorFetchOptions?: EnvironmentFetchOptions;
+  readonly bootstrapFetchOptions?: EnvironmentFetchOptions;
+  readonly sessionFetchOptions?: EnvironmentFetchOptions;
+  readonly wsTokenFetchOptions?: EnvironmentFetchOptions;
 }
 
 export interface LocalAttachOptions extends AttachRuntimeOptions {
@@ -36,6 +39,7 @@ export interface LocalAttachOptions extends AttachRuntimeOptions {
   readonly serverEntry?: string;
   readonly serverCommand?: ServerCommandSpec;
   readonly execFile?: typeof execFile;
+  readonly ownerSessionCommandTimeoutMs?: number;
 }
 
 export interface ServerCommandSpec {
@@ -56,6 +60,34 @@ export interface PersistedRuntimeState {
   readonly port: number;
   readonly origin: string;
   readonly startedAt: string;
+}
+
+export class LocalAttachMissError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LocalAttachMissError";
+  }
+}
+
+export class LocalAttachStaleError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LocalAttachStaleError";
+  }
+}
+
+export class LocalAttachIncompatibleError extends Error {
+  constructor(message = "Attached server is not compatible with this X1Shell TUI.") {
+    super(message);
+    this.name = "LocalAttachIncompatibleError";
+  }
+}
+
+class LocalOwnerSessionTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Local owner session command timed out after ${timeoutMs}ms.`);
+    this.name = "LocalOwnerSessionTimeoutError";
+  }
 }
 
 export function normalizeAttachBaseUrl(baseUrl: string | URL): {
@@ -87,13 +119,13 @@ export async function resolveBearerAttachTarget(input: {
   const urls = normalizeAttachBaseUrl(input.baseUrl);
   const descriptor = await fetchEnvironmentDescriptor({
     httpBaseUrl: urls.httpBaseUrl,
-    ...optionalOptions(input.options?.fetchOptions),
+    ...optionalOptions(fetchOptionsFor(input.options, "descriptor")),
   });
   assertCompatibleDescriptor(descriptor);
   const session = await fetchSessionState({
     httpBaseUrl: urls.httpBaseUrl,
     bearerToken: input.bearerToken,
-    ...optionalOptions(input.options?.fetchOptions),
+    ...optionalOptions(fetchOptionsFor(input.options, "session")),
   });
   if (!session.authenticated) {
     throw new Error("Attach bearer session is not authenticated.");
@@ -103,7 +135,7 @@ export async function resolveBearerAttachTarget(input: {
     bearerToken: input.bearerToken,
     descriptor,
     ...(session.role ? { sessionRole: session.role } : {}),
-    ...optionalFetchOptions(input.options?.fetchOptions),
+    ...optionalFetchOptions(fetchOptionsFor(input.options, "ws-token")),
   });
 }
 
@@ -138,13 +170,13 @@ export async function resolveBootstrapAttachTarget(input: {
   const urls = normalizeAttachBaseUrl(input.baseUrl);
   const descriptor = await fetchEnvironmentDescriptor({
     httpBaseUrl: urls.httpBaseUrl,
-    ...optionalOptions(input.options?.fetchOptions),
+    ...optionalOptions(fetchOptionsFor(input.options, "descriptor")),
   });
   assertCompatibleDescriptor(descriptor);
   const bootstrap = await bootstrapBearerSession({
     httpBaseUrl: urls.httpBaseUrl,
     credential: input.credential,
-    ...optionalOptions(input.options?.fetchOptions),
+    ...optionalOptions(fetchOptionsFor(input.options, "bootstrap")),
   });
   return resolveBearerAttachTarget({
     baseUrl: urls.httpBaseUrl,
@@ -167,10 +199,22 @@ export function deriveLocalServerStatePaths(input: {
 
 export async function resolveLocalAttachTarget(input: LocalAttachOptions): Promise<AttachTarget> {
   const paths = deriveLocalServerStatePaths(input);
-  const localEnvironmentId = await readRequiredTrimmedFile(paths.environmentIdPath);
+  if (!(await fileIsReadable(paths.environmentIdPath))) {
+    throw new LocalAttachMissError(
+      "No local environment-id was found for the intended state root.",
+    );
+  }
+  let localEnvironmentId: string;
+  try {
+    localEnvironmentId = await readRequiredTrimmedFile(paths.environmentIdPath);
+  } catch (error) {
+    throw new LocalAttachMissError(error instanceof Error ? error.message : String(error));
+  }
   const runtimeState = await readRuntimeState(paths.runtimeStatePath);
   if (!runtimeState) {
-    throw new Error("No local server runtime state was found for the intended state root.");
+    throw new LocalAttachMissError(
+      "No local server runtime state was found for the intended state root.",
+    );
   }
 
   const staleReason = await validateRuntimeState({
@@ -179,16 +223,32 @@ export async function resolveLocalAttachTarget(input: LocalAttachOptions): Promi
     ...optionalFetchOptions(input.fetchOptions),
   });
   if (staleReason) {
+    if (staleReason === "environment descriptor is not compatible") {
+      throw new LocalAttachIncompatibleError();
+    }
     await compareBeforeDeleteRuntimeState(paths.runtimeStatePath, runtimeState);
-    throw new Error(`Local server runtime state is stale: ${redactText(staleReason)}.`);
+    throw new LocalAttachStaleError(
+      `Local server runtime state is stale: ${redactText(staleReason)}.`,
+    );
   }
 
-  const bearerToken = await issueLocalOwnerBearerSession(input);
-  return resolveBearerAttachTarget({
-    baseUrl: runtimeState.origin,
-    bearerToken,
-    ...(input.fetchOptions ? { options: { fetchOptions: input.fetchOptions } } : {}),
-  });
+  try {
+    const bearerToken = await issueLocalOwnerBearerSession(input);
+    const target = await resolveBearerAttachTarget({
+      baseUrl: runtimeState.origin,
+      bearerToken,
+      ...(input.fetchOptions ? { options: { fetchOptions: input.fetchOptions } } : {}),
+    });
+    await resolveAttachTargetWebSocketUrl(target);
+    return target;
+  } catch (error) {
+    if (isRecoverableLocalAttachTimeout(error)) {
+      throw new LocalAttachStaleError(
+        `Local server runtime state is stale: ${redactUnknown(error)}.`,
+      );
+    }
+    throw error;
+  }
 }
 
 export async function validateRuntimeState(input: {
@@ -294,26 +354,87 @@ export async function issueLocalOwnerBearerSession(input: LocalAttachOptions): P
     input.baseDir,
     ...(input.devUrl ? ["--dev-url", input.devUrl] : []),
   ];
-  const { stdout } = input.execFile
-    ? await new Promise<{ stdout: string | Buffer }>((resolve, reject) => {
-        input.execFile?.(command.executable, args, { windowsHide: true }, (error, stdout) => {
-          if (error) {
-            reject(sanitizeLocalAuthCommandError(error));
-            return;
-          }
-          resolve({ stdout });
-        });
-      })
-    : await execFileAsync(command.executable, args, { windowsHide: true }).catch(
-        (error: unknown) => {
-          throw sanitizeLocalAuthCommandError(error);
-        },
-      );
+  const { stdout } = await runLocalOwnerBearerSessionCommand({
+    command,
+    args,
+    ...(input.execFile ? { execFile: input.execFile } : {}),
+    ...(input.ownerSessionCommandTimeoutMs
+      ? { timeoutMs: input.ownerSessionCommandTimeoutMs }
+      : {}),
+  });
   const token = String(stdout).trim();
   if (!token) {
     throw new Error("Local owner session command did not return a bearer token.");
   }
   return token;
+}
+
+function runLocalOwnerBearerSessionCommand(input: {
+  readonly command: ServerCommandSpec;
+  readonly args: readonly string[];
+  readonly execFile?: typeof execFile;
+  readonly timeoutMs?: number;
+}): Promise<{ stdout: string | Buffer }> {
+  return new Promise<{ stdout: string | Buffer }>((resolve, reject) => {
+    let settled = false;
+    let child: ChildProcess | undefined;
+    const timeoutMs = input.timeoutMs;
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          child?.kill();
+          reject(new LocalOwnerSessionTimeoutError(timeoutMs));
+        }, timeoutMs)
+      : undefined;
+    timer?.unref();
+
+    try {
+      child = (input.execFile ?? execFile)(
+        input.command.executable,
+        input.args,
+        { windowsHide: true },
+        (error, stdout) => {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
+          if (error) {
+            reject(sanitizeLocalAuthCommandError(error));
+            return;
+          }
+          resolve({ stdout });
+        },
+      );
+    } catch (error) {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      reject(sanitizeLocalAuthCommandError(error));
+    }
+  });
+}
+
+function isRecoverableLocalAttachTimeout(error: unknown): boolean {
+  return (
+    error instanceof BoundedFetchTimeoutError ||
+    error instanceof LocalOwnerSessionTimeoutError ||
+    hasBoundedFetchTimeoutCause(error)
+  );
+}
+
+function resolveAttachTargetWebSocketUrl(
+  target: AttachTarget,
+): Promise<string | URL> | string | URL {
+  return typeof target.webSocketUrlProvider === "function"
+    ? target.webSocketUrlProvider()
+    : target.webSocketUrlProvider;
+}
+
+function hasBoundedFetchTimeoutCause(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === "BoundedFetchTimeoutError") return true;
+  if (error.message.includes("BoundedFetchTimeoutError:")) return true;
+  return hasBoundedFetchTimeoutCause(error.cause);
 }
 
 function resolveServerCommand(input: LocalAttachOptions): ServerCommandSpec {
@@ -366,6 +487,23 @@ function optionalFetchOptions(fetchOptions: EnvironmentFetchOptions | undefined)
   return fetchOptions ? { fetchOptions } : {};
 }
 
+function fetchOptionsFor(
+  options: AttachRuntimeOptions | undefined,
+  phase: "descriptor" | "bootstrap" | "session" | "ws-token",
+): EnvironmentFetchOptions | undefined {
+  if (!options) return undefined;
+  switch (phase) {
+    case "descriptor":
+      return options.descriptorFetchOptions ?? options.fetchOptions;
+    case "bootstrap":
+      return options.bootstrapFetchOptions ?? options.fetchOptions;
+    case "session":
+      return options.sessionFetchOptions ?? options.fetchOptions;
+    case "ws-token":
+      return options.wsTokenFetchOptions ?? options.fetchOptions;
+  }
+}
+
 async function readRequiredTrimmedFile(filePath: string): Promise<string> {
   const value = (await readFile(filePath, "utf8")).trim();
   if (!value) {
@@ -405,7 +543,7 @@ function isPidLive(pid: number): boolean {
 
 function assertCompatibleDescriptor(descriptor: ExecutionEnvironmentDescriptor): void {
   if (!isCompatibleDescriptor(descriptor)) {
-    throw new Error("Attached server is not compatible with this X1Shell TUI.");
+    throw new LocalAttachIncompatibleError();
   }
 }
 

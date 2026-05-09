@@ -1,3 +1,4 @@
+import path from "node:path";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import type React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -82,6 +83,7 @@ import { DebugPanel } from "../ui/DebugPanel.js";
 import { DiffPanel } from "../ui/DiffPanel.js";
 import { KeyboardHelp } from "../ui/KeyboardHelp.js";
 import { SettingsPanel } from "../ui/SettingsPanel.js";
+import { X1ShellLogo } from "../ui/landing/X1ShellLogo.js";
 import { resolveX1ShellLandingLayout } from "../ui/landing/responsiveLayout.js";
 
 const MAX_DIFF_CACHE_ENTRIES = 12;
@@ -115,6 +117,7 @@ type DraftControlContext = {
 export function App(props: {
   interruptRequestToken: number;
   paths: TuiPaths;
+  launchCwd: string;
   theme: TuiTheme;
   serverStatus?: TuiServerStatusSnapshot;
   shellState?: TuiShellState;
@@ -170,6 +173,9 @@ export function App(props: {
     : null;
   const activeThreadHeader = activeThreadShell ?? activeDetail;
   const draftProjectId = activeProject?.id ?? activeThreadShell?.projectId ?? null;
+  const draftProjectTitle = activeProject
+    ? workspaceBasename(activeProject.workspaceRoot)
+    : workspaceBasename(props.launchCwd);
   const draft = draftProjectId ? (shell.draftByProjectId[draftProjectId] ?? "") : "";
   const projectDraftContext = draftProjectId
     ? (shell.draftContextByProjectId[draftProjectId] ?? {})
@@ -275,11 +281,14 @@ export function App(props: {
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") {
       if (activeThreadHeader?.session?.status === "running" && activeThreadHeader.id) {
-        void props.onSubmitCommand?.(
-          buildThreadTurnInterrupt({
-            threadId: activeThreadHeader.id,
-            turnId: activeThreadHeader.session.activeTurnId,
-          }),
+        const turnId = activeThreadHeader.session.activeTurnId;
+        runAsyncAction(() =>
+          props.onSubmitCommand?.(
+            buildThreadTurnInterrupt({
+              threadId: activeThreadHeader.id,
+              turnId,
+            }),
+          ),
         );
       } else {
         props.onRequestExit();
@@ -313,7 +322,7 @@ export function App(props: {
         if (action) {
           setVisiblePanel(null);
           setPaletteQuery("");
-          void performAction(action.id);
+          runAsyncAction(() => performAction(action.id));
         }
         return;
       }
@@ -360,12 +369,14 @@ export function App(props: {
           selectedOptions: selectedInputOptions,
           customAnswers: customInputAnswers,
         });
-        void props.onSubmitCommand?.(
-          buildThreadUserInputResponse({
-            threadId: activeThreadHeader.id,
-            requestId: activePendingUserInput.requestId,
-            answers,
-          }),
+        runAsyncAction(() =>
+          props.onSubmitCommand?.(
+            buildThreadUserInputResponse({
+              threadId: activeThreadHeader.id,
+              requestId: activePendingUserInput.requestId,
+              answers,
+            }),
+          ),
         );
         setCustomInputAnswers({});
         setSelectedInputOptions({});
@@ -454,27 +465,27 @@ export function App(props: {
       return;
     }
     if (composerText.length === 0 && key.name === "R") {
-      void performAction("connection.reconnect");
+      runAsyncAction(() => performAction("connection.reconnect"));
       return;
     }
     if (composerText.length === 0 && key.name === "p") {
-      void performAction("providers.refresh");
+      runAsyncAction(() => performAction("providers.refresh"));
       return;
     }
     if (composerText.length === 0 && key.name === "g") {
-      void performAction("vcs.refresh");
+      runAsyncAction(() => performAction("vcs.refresh"));
       return;
     }
     if (composerText.length === 0 && key.name === "m") {
-      void performAction("model.next");
+      runAsyncAction(() => performAction("model.next"));
       return;
     }
     if (composerText.length === 0 && key.name === "r") {
-      void performAction("runtime.next");
+      runAsyncAction(() => performAction("runtime.next"));
       return;
     }
     if (composerText.length === 0 && key.name === "i") {
-      void performAction("interaction.next");
+      runAsyncAction(() => performAction("interaction.next"));
       return;
     }
     if (activePendingApproval && activeThreadHeader?.id && composerText.length === 0) {
@@ -489,38 +500,40 @@ export function App(props: {
                 ? "cancel"
                 : null;
       if (decision) {
-        void props.onSubmitCommand?.(
-          buildThreadApprovalResponse({
-            threadId: activeThreadHeader.id,
-            requestId: activePendingApproval.requestId,
-            decision,
-          }),
+        runAsyncAction(() =>
+          props.onSubmitCommand?.(
+            buildThreadApprovalResponse({
+              threadId: activeThreadHeader.id,
+              requestId: activePendingApproval.requestId,
+              decision,
+            }),
+          ),
         );
         return;
       }
     }
     if (key.name === "q" && composerText.length === 0) {
-      void performAction("turn.interrupt-or-exit");
+      runAsyncAction(() => performAction("turn.interrupt-or-exit"));
       return;
     }
     if (composerText.length === 0 && key.name === "up") {
-      void performAction("thread.previous");
+      runAsyncAction(() => performAction("thread.previous"));
       return;
     }
     if (composerText.length === 0 && key.name === "down") {
-      void performAction("thread.next");
+      runAsyncAction(() => performAction("thread.next"));
       return;
     }
     if (key.ctrl && key.name === "n") {
-      void performAction("thread.new");
+      runAsyncAction(() => performAction("thread.new"));
       return;
     }
     if (composerText.length === 0 && key.name === "s" && canStopThreadSession(activeThreadHeader)) {
-      void performAction("thread.stop");
+      runAsyncAction(() => performAction("thread.stop"));
       return;
     }
     if (composerText.length === 0 && key.name === "a" && activeThreadHeader?.id) {
-      void performAction("thread.archive-toggle");
+      runAsyncAction(() => performAction("thread.archive-toggle"));
       return;
     }
     if (key.name === "backspace") {
@@ -528,7 +541,7 @@ export function App(props: {
       return;
     }
     if (key.name === "return" || key.name === "enter") {
-      void submit();
+      runAsyncAction(() => submit());
       return;
     }
     if (isPlainTextSequence(key)) {
@@ -562,6 +575,19 @@ export function App(props: {
 
   function setDraftAttachments(attachments: readonly UploadChatAttachment[]) {
     if (draftProjectId) props.onDraftAttachmentsChange?.(draftProjectId, attachments);
+  }
+
+  function runAsyncAction(action: () => Promise<unknown> | unknown): void {
+    try {
+      const result = action();
+      if (result && typeof (result as Promise<unknown>).then === "function") {
+        void (result as Promise<unknown>).catch((error: unknown) => {
+          setSubmitError(displayText(String(error)));
+        });
+      }
+    } catch (error) {
+      setSubmitError(displayText(String(error)));
+    }
   }
 
   function selectAdjacentProject(direction: 1 | -1) {
@@ -690,7 +716,7 @@ export function App(props: {
         setVisiblePanel(visiblePanel === "settings" ? null : "settings");
         return;
       case "model.next":
-        cycleModel();
+        await cycleModel();
         return;
       case "runtime.next":
         await setRuntimeMode(nextRuntimeMode(selectedRuntimeMode));
@@ -785,7 +811,7 @@ export function App(props: {
     }
   }
 
-  function cycleModel() {
+  async function cycleModel() {
     if (!draftProjectId || !status.config?.providers.length) return;
     const models = deriveProviderInstanceEntries(status.config.providers).flatMap((entry) =>
       providerSelectable(entry.provider)
@@ -807,7 +833,7 @@ export function App(props: {
         ...threadControlContext,
         modelSelection: next as ModelSelection,
       });
-      void props.onSubmitCommand?.(
+      await props.onSubmitCommand?.(
         buildThreadMetaUpdate({
           threadId: activeThreadHeader.id,
           modelSelection: next as ModelSelection,
@@ -883,6 +909,7 @@ export function App(props: {
       {layout.showSidebar || sidebarOverlayOpen ? (
         <Sidebar
           shell={shell}
+          connection={status.connection}
           layout={sidebarOverlayOpen ? overlaySidebarLayout(layout) : layout}
           overlay={sidebarOverlayOpen}
           focusArea={focusArea}
@@ -929,7 +956,7 @@ export function App(props: {
       <box flexGrow={1} flexDirection="column" backgroundColor={props.theme.palette.main}>
         <MainHeader
           thread={activeThreadHeader}
-          projectTitle={activeProject ? displayProject(activeProject).title : null}
+          projectTitle={draftProjectTitle}
           showProjectBadge={layout.showHeaderProjectBadge}
           showSidebarToggle={layout.showSidebarToggle}
           showSidebar={layout.showSidebar || sidebarOverlayOpen}
@@ -941,8 +968,8 @@ export function App(props: {
               setSidebarCollapsedPreference((current) => !current);
             }
           }}
-          onToggleDiff={() => void performAction("diff.toggle")}
-          onRefreshVcs={() => void performAction("vcs.refresh")}
+          onToggleDiff={() => runAsyncAction(() => performAction("diff.toggle"))}
+          onRefreshVcs={() => runAsyncAction(() => performAction("vcs.refresh"))}
           viewportColumns={dimensions.width}
           gitStatus={gitStatus}
           diffActive={visiblePanel === "diff"}
@@ -982,9 +1009,12 @@ export function App(props: {
           ) : (
             <ConversationArea
               timeline={timeline}
-              connected={status.connection === "connected"}
+              viewportColumns={
+                dimensions.width - (layout.showSidebar ? layout.sidebarWidth + 1 : 0) - 4
+              }
+              connection={status.connection}
               banners={banners}
-              showStartupCard={Boolean(!activeProject && !activeThreadHeader && !draftProjectId)}
+              showLandingLogo={Boolean(!activeThreadHeader && timeline.length === 0)}
               focused={focusArea === "timeline"}
               theme={props.theme}
             />
@@ -1010,11 +1040,11 @@ export function App(props: {
           isRunning={activeThreadHeader?.session?.status === "running"}
           layout={layout}
           viewportColumns={dimensions.width}
-          onCycleModel={() => void performAction("model.next")}
-          onCycleRuntime={() => void performAction("runtime.next")}
-          onCycleInteraction={() => void performAction("interaction.next")}
-          onPrimaryAction={() => void performAction("message.send")}
-          onStop={() => void performAction("thread.stop")}
+          onCycleModel={() => runAsyncAction(() => performAction("model.next"))}
+          onCycleRuntime={() => runAsyncAction(() => performAction("runtime.next"))}
+          onCycleInteraction={() => runAsyncAction(() => performAction("interaction.next"))}
+          onPrimaryAction={() => runAsyncAction(() => performAction("message.send"))}
+          onStop={() => runAsyncAction(() => performAction("thread.stop"))}
           focused={focusArea === "composer"}
           controlsFocused={focusArea === "controls"}
           onFocusComposer={() => setFocusArea("composer")}
@@ -1108,6 +1138,7 @@ function PendingUserInputPanel(props: {
 
 function Sidebar(props: {
   shell: TuiShellState;
+  connection: TuiServerStatusSnapshot["connection"];
   layout: ReturnType<typeof resolveX1ShellLandingLayout>;
   overlay?: boolean;
   focusArea: LandingFocusArea;
@@ -1147,10 +1178,25 @@ function Sidebar(props: {
           theme={props.theme}
         />
         {props.shell.projects.length === 0 ? (
-          <box paddingLeft={2} paddingRight={2} paddingTop={1} paddingBottom={1}>
-            <text fg={props.theme.palette.muted}>
-              Add a workspace path to start. The current folder is prefilled.
-            </text>
+          <box
+            paddingLeft={2}
+            paddingRight={2}
+            paddingTop={1}
+            paddingBottom={1}
+            flexDirection="column"
+          >
+            {props.connection === "connected" ? (
+              <text fg={props.theme.palette.muted}>
+                Add a workspace path to start. The current folder is prefilled.
+              </text>
+            ) : (
+              <>
+                <text fg={props.theme.palette.muted}>Connecting workspace</text>
+                <text fg={props.theme.palette.subtle}>
+                  Opening the RPC session and waiting for shell state.
+                </text>
+              </>
+            )}
           </box>
         ) : null}
         {projects.map((project) => {
@@ -1282,7 +1328,7 @@ function MainHeader(props: {
   onFocusControls: () => void;
   theme: TuiTheme;
 }) {
-  const fallbackTitle = props.projectTitle ?? "New thread";
+  const fallbackTitle = props.projectTitle ? `New thread [${props.projectTitle}]` : "New thread";
   const title = truncateTitleForDisplay(
     props.thread ? displayThread(props.thread).title : fallbackTitle,
     headerTitleMaxLength({
@@ -1376,19 +1422,24 @@ function MainHeader(props: {
 
 function ConversationArea(props: {
   timeline: ReturnType<ReturnType<typeof createConversationDisplayCache>["buildTimeline"]>;
-  connected: boolean;
+  viewportColumns: number;
+  connection: TuiServerStatusSnapshot["connection"];
   banners: readonly TuiErrorBanner[];
-  showStartupCard: boolean;
+  showLandingLogo: boolean;
   focused: boolean;
   theme: TuiTheme;
 }) {
   const statusCards = landingStatusCards({
-    connected: props.connected,
+    connection: props.connection,
     banners: props.banners,
-    showStartupCard: props.showStartupCard,
   });
   return (
     <scrollbox flexGrow={1} flexShrink={1} minHeight={0} paddingRight={1} focused={props.focused}>
+      {props.showLandingLogo && statusCards.length === 0 ? (
+        <box height="100%" minHeight={8} flexDirection="column">
+          <X1ShellLogo viewportColumns={props.viewportColumns} theme={props.theme} />
+        </box>
+      ) : null}
       {props.timeline.length === 0
         ? statusCards.map((card) => (
             <box
@@ -2006,6 +2057,14 @@ function truncateTitleForDisplay(value: string, maxLength: number): string {
   return `${value.slice(0, maxLength - 1)}…`;
 }
 
+function workspaceBasename(workspaceRoot: string): string {
+  try {
+    return displayText(path.basename(path.resolve(workspaceRoot)) || "workspace");
+  } catch {
+    return "workspace";
+  }
+}
+
 function headerTitleMaxLength(input: {
   viewportColumns: number;
   showSidebarToggle: boolean;
@@ -2023,21 +2082,19 @@ function headerTitleMaxLength(input: {
 }
 
 function landingStatusCards(input: {
-  connected: boolean;
+  connection: TuiServerStatusSnapshot["connection"];
   banners: readonly TuiErrorBanner[];
-  showStartupCard: boolean;
 }): readonly TuiErrorBanner[] {
-  const startupCard: TuiErrorBanner = {
-    kind: "info",
-    title: "booting workspace",
-    detail: "",
-  };
   const cards = input.banners.filter((banner) => {
     if (banner.title === "Attach auth required") return false;
     if (banner.title === "Not connected") return false;
+    if (banner.title === "Connecting") return false;
+    if (banner.title === "Server starting") return false;
+    if (banner.kind === "info") return false;
+    if (input.connection !== "connected" && banner.title !== "Connection error") return false;
     return true;
   });
-  return input.showStartupCard ? [startupCard, ...cards] : cards;
+  return cards;
 }
 
 function nextFocusArea(current: LandingFocusArea, sidebarVisible: boolean): LandingFocusArea {
@@ -2169,9 +2226,7 @@ function composerPlaceholder(input: {
     return "Type your own answer, or leave this blank to use the selected option";
   }
   if (!input.hasActiveThread && input.composerText.length === 0) {
-    return input.hasDraftThread
-      ? "Start a new thread with a prompt"
-      : "Ask for follow-up changes or attach images";
+    return "Ask anything or @tag files/folders";
   }
   return "Ask anything or @tag files/folders";
 }

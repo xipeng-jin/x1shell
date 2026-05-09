@@ -54,4 +54,36 @@ describe("TUI stream batcher", () => {
     expect(batches).toEqual([[1, 2, 3]]);
     vi.useRealTimers();
   });
+
+  it("routes timer flush errors to the error handler without throwing", () => {
+    vi.useFakeTimers();
+    const errors: unknown[] = [];
+    const batcher = createStreamBatcher<number>({
+      onFlush: () => {
+        throw new Error("timer failed");
+      },
+      onFlushError: (error) => errors.push(error),
+    });
+
+    batcher.push(1);
+
+    expect(() => vi.advanceTimersByTime(16)).not.toThrow();
+    expect(String(errors[0])).toContain("timer failed");
+    vi.useRealTimers();
+  });
+
+  it("still throws explicit flush errors after reporting them", () => {
+    const errors: unknown[] = [];
+    const batcher = createStreamBatcher<number>({
+      onFlush: () => {
+        throw new Error("explicit failed");
+      },
+      onFlushError: (error) => errors.push(error),
+    });
+
+    batcher.push(1);
+
+    expect(() => batcher.flush()).toThrow("explicit failed");
+    expect(String(errors[0])).toContain("explicit failed");
+  });
 });

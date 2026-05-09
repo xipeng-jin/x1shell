@@ -1,8 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
-import { findProviderInstance } from "./providerInstances.js";
+import {
+  DEFAULT_MODEL,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+} from "@t3tools/contracts";
+import { createDefaultTuiModelSelection, findProviderInstance } from "./providerInstances.js";
 
 describe("TUI provider instance helpers", () => {
+  it("derives the default Codex model from shared contracts", () => {
+    expect(createDefaultTuiModelSelection()).toMatchObject({
+      instanceId: ProviderInstanceId.make("codex"),
+      model: DEFAULT_MODEL,
+    });
+  });
+
+  it("normalizes explicit default model aliases through the shared resolver", () => {
+    expect(createDefaultTuiModelSelection("5.4")).toMatchObject({
+      instanceId: ProviderInstanceId.make("codex"),
+      model: DEFAULT_MODEL,
+    });
+  });
+
   it("does not fall back to another provider when the selected instance is missing", () => {
     const providers = [provider({ instanceId: "codex", driver: "codex", displayName: "Codex" })];
 
