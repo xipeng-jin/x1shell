@@ -19,139 +19,111 @@ import {
 } from "./input.js";
 
 const TUI_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const HEADLESS_SMOKE_TEST_TIMEOUT_MS = 15_000;
+const HEADLESS_SMOKE_CHILD_TIMEOUT_MS = 12_000;
 
 describe("App headless smoke", () => {
-  it("captures a static boot frame", () => {
-    const dir = createTempDir("x1shell-tui-headless-");
-    const framePath = join(dir, "frame.txt");
+  it(
+    "captures a static boot frame",
+    () => {
+      const dir = createTempDir("x1shell-tui-headless-");
+      const framePath = join(dir, "frame.txt");
 
-    execFileSync(
-      "bun",
-      [
-        "run",
-        "src/index.tsx",
-        "--headless",
-        "--headless-width=110",
-        "--headless-height=24",
-        `--headless-frame=${framePath}`,
-      ],
-      {
-        cwd: TUI_PACKAGE_DIR,
-        env: {
-          ...process.env,
-          X1SHELL_CONFIG_HOME: join(dir, "X1SHELL_TOKEN=secret", "config"),
-          X1SHELL_DATA_HOME: join(dir, "data"),
-          X1SHELL_CACHE_HOME: join(dir, "cache"),
-          X1SHELL_STATE_HOME: join(dir, "state"),
-        },
-        stdio: "pipe",
-      },
-    );
+      captureHeadlessFrame(framePath, {
+        "--headless-width": "110",
+        "--headless-height": "24",
+        X1SHELL_CONFIG_HOME: join(dir, "X1SHELL_TOKEN=secret", "config"),
+        X1SHELL_DATA_HOME: join(dir, "data"),
+        X1SHELL_CACHE_HOME: join(dir, "cache"),
+        X1SHELL_STATE_HOME: join(dir, "state"),
+      });
 
-    const frame = readFileSync(framePath, "utf8");
+      const frame = readFileSync(framePath, "utf8");
 
-    expect(frame).toContain("X1Shell");
-    expect(frame).toContain("ALPHA");
-    expect(frame).toContain("PROJECTS");
-    expect(frame).toContain("Connecting workspace");
-    expect(frame).toContain("Opening the RPC session");
-    expect(frame).toContain("and waiting for shell");
-    expect(frame).toContain("state.");
-    expect(frame).toContain("New thread [tui]");
-    expect(frame).toContain("Ask anything or @tag files/folders");
-    expect(frame).toContain("▄▄▄   ▄▄▄");
-    expect(frame).toContain("GPT-5");
-    expect(frame).not.toContain("booting workspace");
-    expect(frame).not.toContain("Opening the RPC session...");
-    expect(frame).not.toContain("Attach auth required");
-    expect(frame).not.toContain("No model");
-    expect(frame).not.toContain("Local");
-    expect(frame).not.toContain("secret");
-    expect(frame).not.toContain("shell seq");
-    expect(frame).not.toContain("X1SHELL_TOKEN");
-    expect(frame).not.toContain("help/palette");
-  });
+      expect(frame).toContain("X1Shell");
+      expect(frame).toContain("ALPHA");
+      expect(frame).toContain("PROJECTS");
+      expect(frame).toContain("Connecting workspace");
+      expect(frame).toContain("Opening the RPC session");
+      expect(frame).toContain("and waiting for shell");
+      expect(frame).toContain("state.");
+      expect(frame).toContain("New thread [tui]");
+      expect(frame).toContain("Ask anything or @tag files/folders");
+      expect(frame).toContain("▄▄▄   ▄▄▄");
+      expect(frame).toContain("GPT-5");
+      expect(frame).not.toContain("booting workspace");
+      expect(frame).not.toContain("Opening the RPC session...");
+      expect(frame).not.toContain("Attach auth required");
+      expect(frame).not.toContain("No model");
+      expect(frame).not.toContain("Local");
+      expect(frame).not.toContain("secret");
+      expect(frame).not.toContain("shell seq");
+      expect(frame).not.toContain("X1SHELL_TOKEN");
+      expect(frame).not.toContain("help/palette");
+    },
+    HEADLESS_SMOKE_TEST_TIMEOUT_MS,
+  );
 
-  it("captures a compact logo boot frame on narrow terminals", () => {
-    const dir = createTempDir("x1shell-tui-narrow-");
-    const framePath = join(dir, "frame.txt");
+  it(
+    "captures a compact logo boot frame on narrow terminals",
+    () => {
+      const dir = createTempDir("x1shell-tui-narrow-");
+      const framePath = join(dir, "frame.txt");
 
-    execFileSync(
-      "bun",
-      [
-        "run",
-        "src/index.tsx",
-        "--headless",
-        "--headless-width=60",
-        "--headless-height=20",
-        `--headless-frame=${framePath}`,
-      ],
-      {
-        cwd: TUI_PACKAGE_DIR,
-        env: {
-          ...process.env,
-          X1SHELL_CONFIG_HOME: join(dir, "config"),
-          X1SHELL_DATA_HOME: join(dir, "data"),
-          X1SHELL_CACHE_HOME: join(dir, "cache"),
-          X1SHELL_STATE_HOME: join(dir, "state"),
-        },
-        stdio: "pipe",
-      },
-    );
+      captureHeadlessFrame(framePath, {
+        "--headless-width": "60",
+        "--headless-height": "20",
+        X1SHELL_CONFIG_HOME: join(dir, "config"),
+        X1SHELL_DATA_HOME: join(dir, "data"),
+        X1SHELL_CACHE_HOME: join(dir, "cache"),
+        X1SHELL_STATE_HOME: join(dir, "state"),
+      });
 
-    const frame = readFileSync(framePath, "utf8");
-    expect(frame).toContain("New thread [tui]");
-    expect(frame).toContain("X1SHELL");
-    expect(frame).not.toContain("▄▄▄   ▄▄▄");
-    expect(frame).not.toContain("booting workspace");
-  });
+      const frame = readFileSync(framePath, "utf8");
+      expect(frame).toContain("New thread [tui]");
+      expect(frame).toContain("X1SHELL");
+      expect(frame).not.toContain("▄▄▄   ▄▄▄");
+      expect(frame).not.toContain("booting workspace");
+    },
+    HEADLESS_SMOKE_TEST_TIMEOUT_MS,
+  );
 
-  it("renders shell projects, threads, detail, composer, and sanitized text", () => {
-    const dir = createTempDir("x1shell-tui-fixture-");
-    const framePath = join(dir, "frame.txt");
+  it(
+    "renders shell projects, threads, detail, composer, and sanitized text",
+    () => {
+      const dir = createTempDir("x1shell-tui-fixture-");
+      const framePath = join(dir, "frame.txt");
 
-    execFileSync(
-      "bun",
-      [
-        "run",
-        "src/index.tsx",
-        "--headless",
-        "--headless-width=120",
-        "--headless-height=28",
-        `--headless-frame=${framePath}`,
-      ],
-      {
-        cwd: TUI_PACKAGE_DIR,
-        env: {
-          ...process.env,
-          X1SHELL_HEADLESS_FIXTURE: "1",
-          X1SHELL_CONFIG_HOME: join(dir, "config"),
-          X1SHELL_DATA_HOME: join(dir, "data"),
-          X1SHELL_CACHE_HOME: join(dir, "cache"),
-          X1SHELL_STATE_HOME: join(dir, "state"),
-        },
-        stdio: "pipe",
-      },
-    );
+      captureHeadlessFrame(framePath, {
+        "--headless-width": "120",
+        "--headless-height": "28",
+        X1SHELL_HEADLESS_FIXTURE: "1",
+        X1SHELL_CONFIG_HOME: join(dir, "config"),
+        X1SHELL_DATA_HOME: join(dir, "data"),
+        X1SHELL_CACHE_HOME: join(dir, "cache"),
+        X1SHELL_STATE_HOME: join(dir, "state"),
+      });
 
-    const frame = readFileSync(framePath, "utf8");
-    expect(frame).toContain("X1Shell");
-    expect(frame).toContain("ALPHA");
-    expect(frame).toContain("PROJECTS");
-    expect(frame).toContain("Thread Shell Fresh");
-    expect(frame).not.toContain("Thread Detail Stale");
-    expect(frame).toContain("hello link");
-    expect(frame).toContain("Plan with");
-    expect(frame).toContain("draft");
-    expect(frame).toContain("Local");
-    expect(frame).toContain("Full access");
-    expect(frame).not.toContain("Threads");
-    expect(frame).not.toContain("shell seq");
-    expect(frame).not.toContain("Message agent");
-    expect(frame).not.toContain("\u001b]8");
-    expect(frame).not.toContain("evil.example");
-    expect(frame).not.toContain("plan-secret");
-  });
+      const frame = readFileSync(framePath, "utf8");
+      expect(frame).toContain("X1Shell");
+      expect(frame).toContain("ALPHA");
+      expect(frame).toContain("PROJECTS");
+      expect(frame).toContain("Thread Shell Fresh");
+      expect(frame).not.toContain("Thread Detail Stale");
+      expect(frame).toContain("hello link");
+      expect(frame).toContain("Plan with");
+      expect(frame).toContain("draft");
+      expect(frame).toContain("Local");
+      expect(frame).toContain("Full access");
+      expect(frame).not.toContain("Threads");
+      expect(frame).not.toContain("shell seq");
+      expect(frame).not.toContain("Message agent");
+      expect(frame).not.toContain("\u001b]8");
+      expect(frame).not.toContain("evil.example");
+      expect(frame).not.toContain("plan-secret");
+    },
+    HEADLESS_SMOKE_TEST_TIMEOUT_MS,
+  );
 
   it("treats pending user-input shortcut letters as plain text", () => {
     for (const key of ["d", "p", "g", "m", "r", "i", "R", "?", ","]) {
@@ -251,4 +223,44 @@ function createTempDir(prefix: string): string {
   const parent = process.env.TMPDIR ?? resolve(process.cwd(), "../../.tmp/tui-tests");
   mkdirSync(parent, { recursive: true });
   return mkdtempSync(join(parent, prefix));
+}
+
+function captureHeadlessFrame(
+  framePath: string,
+  options: {
+    readonly "--headless-width": string;
+    readonly "--headless-height": string;
+    readonly X1SHELL_CONFIG_HOME: string;
+    readonly X1SHELL_DATA_HOME: string;
+    readonly X1SHELL_CACHE_HOME: string;
+    readonly X1SHELL_STATE_HOME: string;
+    readonly X1SHELL_HEADLESS_FIXTURE?: string;
+  },
+): void {
+  execFileSync(
+    "bun",
+    [
+      "run",
+      "src/index.tsx",
+      "--headless",
+      `--headless-width=${options["--headless-width"]}`,
+      `--headless-height=${options["--headless-height"]}`,
+      `--headless-frame=${framePath}`,
+    ],
+    {
+      cwd: TUI_PACKAGE_DIR,
+      env: {
+        ...process.env,
+        X1SHELL_HEADLESS_FIXTURE: options.X1SHELL_HEADLESS_FIXTURE ?? "0",
+        X1SHELL_HEADLESS_SETTLE_MS: "25",
+        X1SHELL_SERVER_ENTRY: "",
+        X1SHELL_CONFIG_HOME: options.X1SHELL_CONFIG_HOME,
+        X1SHELL_DATA_HOME: options.X1SHELL_DATA_HOME,
+        X1SHELL_CACHE_HOME: options.X1SHELL_CACHE_HOME,
+        X1SHELL_STATE_HOME: options.X1SHELL_STATE_HOME,
+      },
+      stdio: "pipe",
+      timeout: HEADLESS_SMOKE_CHILD_TIMEOUT_MS,
+    },
+  );
 }
