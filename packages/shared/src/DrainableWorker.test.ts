@@ -1,7 +1,6 @@
 import { it } from "@effect/vitest";
 import { describe, expect } from "vitest";
-import * as Deferred from "effect/Deferred";
-import * as Effect from "effect/Effect";
+import { Deferred, Effect } from "effect";
 
 import { makeDrainableWorker } from "./DrainableWorker.ts";
 

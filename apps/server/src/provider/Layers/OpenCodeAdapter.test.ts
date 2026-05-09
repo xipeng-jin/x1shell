@@ -193,7 +193,9 @@ const openCodeAdapterTestSettings = Schema.decodeSync(OpenCodeSettings)({
 
 const OpenCodeAdapterTestLayer = Layer.effect(
   OpenCodeAdapter,
-  makeOpenCodeAdapter(openCodeAdapterTestSettings),
+  Effect.gen(function* () {
+    return yield* makeOpenCodeAdapter(openCodeAdapterTestSettings);
+  }),
 ).pipe(
   Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
   Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
@@ -388,10 +390,14 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
   );
 
   it.effect("passes agent and variant options for the adapter's bound custom instance id", () => {
-    const instanceId = ProviderInstanceId.make("opencode_zen");
+    const customInstanceId = ProviderInstanceId.make("opencode_zen");
     const adapterLayer = Layer.effect(
       OpenCodeAdapter,
-      makeOpenCodeAdapter(openCodeAdapterTestSettings, { instanceId }),
+      Effect.gen(function* () {
+        return yield* makeOpenCodeAdapter(openCodeAdapterTestSettings, {
+          instanceId: customInstanceId,
+        });
+      }),
     ).pipe(
       Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
@@ -435,10 +441,14 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
   });
 
   it.effect("uses the bound custom instance id for fallback sendTurn model selection", () => {
-    const instanceId = ProviderInstanceId.make("opencode_zen");
+    const customInstanceId = ProviderInstanceId.make("opencode_zen");
     const adapterLayer = Layer.effect(
       OpenCodeAdapter,
-      makeOpenCodeAdapter(openCodeAdapterTestSettings, { instanceId }),
+      Effect.gen(function* () {
+        return yield* makeOpenCodeAdapter(openCodeAdapterTestSettings, {
+          instanceId: customInstanceId,
+        });
+      }),
     ).pipe(
       Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
@@ -477,10 +487,14 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
   });
 
   it.effect("rejects sendTurn model selections for another instance id", () => {
-    const instanceId = ProviderInstanceId.make("opencode_zen");
+    const customInstanceId = ProviderInstanceId.make("opencode_zen");
     const adapterLayer = Layer.effect(
       OpenCodeAdapter,
-      makeOpenCodeAdapter(openCodeAdapterTestSettings, { instanceId }),
+      Effect.gen(function* () {
+        return yield* makeOpenCodeAdapter(openCodeAdapterTestSettings, {
+          instanceId: customInstanceId,
+        });
+      }),
     ).pipe(
       Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
@@ -620,8 +634,10 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
 
       const adapterLayer = Layer.effect(
         OpenCodeAdapter,
-        makeOpenCodeAdapter(openCodeAdapterTestSettings, {
-          nativeEventLogger,
+        Effect.gen(function* () {
+          return yield* makeOpenCodeAdapter(openCodeAdapterTestSettings, {
+            nativeEventLogger,
+          });
         }),
       ).pipe(
         Layer.provideMerge(Layer.succeed(OpenCodeRuntime, OpenCodeRuntimeTestDouble)),

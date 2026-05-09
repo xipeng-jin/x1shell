@@ -1,4 +1,4 @@
-import * as NodeOS from "node:os";
+import * as OS from "node:os";
 import { execFileSync } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { extname, join } from "node:path";
@@ -32,7 +32,7 @@ function trimNonEmpty(value: string | null | undefined): string | undefined {
 
 function readUserLoginShell(): string | undefined {
   try {
-    return trimNonEmpty(NodeOS.userInfo().shell);
+    return trimNonEmpty(OS.userInfo().shell);
   } catch {
     return undefined;
   }

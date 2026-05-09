@@ -20,10 +20,6 @@
       "types": "./src/logging.ts",
       "import": "./src/logging.ts"
     },
-    "./observability": {
-      "types": "./src/observability.ts",
-      "import": "./src/observability.ts"
-    },
     "./shell": {
       "types": "./src/shell.ts",
       "import": "./src/shell.ts"

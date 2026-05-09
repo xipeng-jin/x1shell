@@ -7,10 +7,8 @@
  *
  * @module KeyedCoalescingWorker
  */
-import * as Scope from "effect/Scope";
-import * as Effect from "effect/Effect";
-import * as TxQueue from "effect/TxQueue";
-import * as TxRef from "effect/TxRef";
+import type { Scope } from "effect";
+import { Effect, TxQueue, TxRef } from "effect";
 
 export interface KeyedCoalescingWorker<K, V> {
   readonly enqueue: (key: K, value: V) => Effect.Effect<void>;

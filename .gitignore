@@ -25,5 +25,3 @@ __screenshots__/
 squashfs-root/
 .codex
 .vercel
-dist-electron/
-.electron-runtime/

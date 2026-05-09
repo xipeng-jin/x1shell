@@ -1,9 +1,6 @@
 import type { DesktopDiscoveredSshHost } from "@t3tools/contracts";
 
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Path from "effect/Path";
-import * as PlatformError from "effect/PlatformError";
+import { Effect, FileSystem, Path, PlatformError } from "effect";
 
 import { SshHostDiscoveryError } from "./errors.ts";
 

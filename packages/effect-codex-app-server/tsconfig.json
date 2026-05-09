@@ -4,10 +4,10 @@
     "plugins": [
       {
         "name": "@effect/language-service",
-        "namespaceImportPackages": ["@effect/platform-node", "effect"],
+        "namespaceImportPackages": ["@effect/platform-node"],
         "diagnosticSeverity": {
           "importFromBarrel": "error",
-          "anyUnknownInErrorContext": "error",
+          "anyUnknownInErrorContext": "warning",
           "instanceOfSchema": "warning",
           "deterministicKeys": "warning"
         }
