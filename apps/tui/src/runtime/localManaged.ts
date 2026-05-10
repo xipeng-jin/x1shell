@@ -7,6 +7,7 @@ import {
   fetchEnvironmentDescriptor,
   type EnvironmentFetchOptions,
 } from "@t3tools/client-runtime/environment";
+import type { DesktopBackendBootstrap } from "@t3tools/contracts";
 import type { AttachTarget, ServerCommandSpec } from "./attach.js";
 import {
   LocalAttachMissError,
@@ -383,11 +384,11 @@ function spawnOwnedServer(input: {
     host: "127.0.0.1",
     port: input.port,
     t3Home: input.baseDir,
-    ...(input.devUrl ? { devUrl: input.devUrl } : {}),
     noBrowser: true,
-    autoBootstrapProjectFromCwd: true,
+    tailscaleServeEnabled: false,
+    tailscaleServePort: 443,
     desktopBootstrapToken: input.bootstrapToken,
-  };
+  } satisfies DesktopBackendBootstrap;
   bootstrapPipe.end(`${JSON.stringify(envelope)}\n`);
   child.stdout?.on("data", (chunk) => {
     input.logger?.info("local server stdout", redactText(String(chunk)));

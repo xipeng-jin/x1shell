@@ -85,10 +85,11 @@ describe("local managed supervisor", () => {
       port: 4555,
       t3Home: "/tmp/t3",
       noBrowser: true,
-      autoBootstrapProjectFromCwd: true,
+      tailscaleServeEnabled: false,
+      tailscaleServePort: 443,
     });
-    expect(JSON.parse(envelope)).not.toHaveProperty("tailscaleServeEnabled");
-    expect(JSON.parse(envelope)).not.toHaveProperty("tailscaleServePort");
+    expect(JSON.parse(envelope)).not.toHaveProperty("autoBootstrapProjectFromCwd");
+    expect(JSON.parse(envelope)).not.toHaveProperty("devUrl");
     expect(envelope).toContain("desktopBootstrapToken");
     const spawnCalls = spawnMock.mock.calls as unknown as Array<[string, string[]]>;
     const spawnArgs = spawnCalls[0]?.[1];
