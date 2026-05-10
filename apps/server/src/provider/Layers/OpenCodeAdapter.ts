@@ -356,13 +356,18 @@ export function appendOpenCodeAssistantTextDelta(
   };
 }
 
-const isoFromEpochMs = (value: number) =>
-  DateTime.make(value).pipe(
+const isoFromEpochMs = (value: number) => {
+  // OpenCode can use non-positive lifecycle timestamps as missing-value sentinels.
+  if (!Number.isFinite(value) || value <= 0) {
+    return undefined;
+  }
+  return DateTime.make(value).pipe(
     Option.match({
       onNone: () => undefined,
       onSome: DateTime.formatIso,
     }),
   );
+};
 
 function messageRoleForPart(
   context: OpenCodeSessionContext,
