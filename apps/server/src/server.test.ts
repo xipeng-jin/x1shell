@@ -640,7 +640,7 @@ const buildAppUnderTest = (options?: {
               snapshotSequence: 0,
               projects: [],
               threads: [],
-              updatedAt: new Date(0).toISOString(),
+              updatedAt: DateTime.formatIso(TEST_EPOCH),
             }),
           getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
           getProjectShellById: () => Effect.succeed(Option.none()),

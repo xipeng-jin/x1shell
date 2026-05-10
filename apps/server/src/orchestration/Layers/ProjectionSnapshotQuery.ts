@@ -23,6 +23,7 @@ import {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -1602,7 +1603,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
                 }),
               ),
-              updatedAt: updatedAt ?? new Date(0).toISOString(),
+              updatedAt:
+                updatedAt ?? DateTime.formatIso(DateTime.makeUnsafe("1970-01-01T00:00:00.000Z")),
             };
 
             return yield* decodeShellSnapshot(snapshot).pipe(
