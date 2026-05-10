@@ -1,5 +1,5 @@
 import { EnvironmentId, type SourceControlDiscoveryResult } from "@t3tools/contracts";
-import { Option } from "effect";
+import * as Option from "effect/Option";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resetAppAtomRegistryForTests } from "../rpc/atomRegistry";

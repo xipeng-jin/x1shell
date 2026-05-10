@@ -5,7 +5,26 @@
     "jsx": "react-jsx",
     "jsxImportSource": "@opentui/react",
     "types": ["bun", "node"],
-    "lib": ["ESNext", "DOM", "esnext.disposable"]
+    "lib": ["ESNext", "DOM", "esnext.disposable"],
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "namespaceImportPackages": ["@effect/platform-node", "effect"],
+        "diagnosticSeverity": {
+          "cryptoRandomUUID": "off",
+          "cryptoRandomUUIDInEffect": "off",
+          "nodeBuiltinImport": "off",
+          "globalDate": "off",
+          "globalDateInEffect": "off",
+          "globalConsole": "off",
+          "globalConsoleInEffect": "off",
+          "globalRandom": "off",
+          "globalRandomInEffect": "off",
+          "globalTimers": "off",
+          "globalTimersInEffect": "off"
+        }
+      }
+    ]
   },
   "include": ["src", "tsdown.config.ts"]
 }

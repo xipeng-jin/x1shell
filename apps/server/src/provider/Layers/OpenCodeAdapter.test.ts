@@ -1,8 +1,16 @@
 import assert from "node:assert/strict";
-
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { Context, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } from "effect";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { beforeEach } from "vitest";
 
 import {
@@ -216,8 +224,8 @@ beforeEach(() => {
   runtimeMock.reset();
 });
 
-const sleep = (ms: number) =>
-  Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+const advanceTestClock = (ms: number) =>
+  TestClock.adjust(`${ms} millis`).pipe(Effect.andThen(Effect.yieldNow));
 
 it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
   it.effect("reuses a configured OpenCode server URL instead of spawning a local server", () =>
@@ -565,6 +573,103 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     }),
   );
 
+  it.effect("falls back to the current time for non-positive OpenCode part timestamps", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-sentinel-time");
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            part: {
+              id: "part-sentinel-time",
+              messageID: "msg-sentinel-time",
+              type: "text",
+              text: "Hello",
+              time: { start: 0 },
+            },
+          },
+        },
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            info: {
+              id: "msg-sentinel-time",
+              role: "assistant",
+            },
+          },
+        },
+      ];
+      const deltaFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId && event.type === "content.delta"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* advanceTestClock(1_000);
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const events = Array.from(yield* Fiber.join(deltaFiber).pipe(Effect.timeout("1 second")));
+      assert.equal(events.length, 1);
+      assert.equal(events[0]?.createdAt, "1970-01-01T00:00:01.000Z");
+    }),
+  );
+
+  it.effect("uses valid positive OpenCode part timestamps", () =>
+    Effect.gen(function* () {
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-opencode-valid-time");
+      runtimeMock.state.subscribedEvents = [
+        {
+          type: "message.part.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            part: {
+              id: "part-valid-time",
+              messageID: "msg-valid-time",
+              type: "text",
+              text: "Hello",
+              time: { start: 1_735_689_600_000 },
+            },
+          },
+        },
+        {
+          type: "message.updated",
+          properties: {
+            sessionID: "http://127.0.0.1:9999/session",
+            info: {
+              id: "msg-valid-time",
+              role: "assistant",
+            },
+          },
+        },
+      ];
+      const deltaFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId && event.type === "content.delta"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const events = Array.from(yield* Fiber.join(deltaFiber).pipe(Effect.timeout("1 second")));
+      assert.equal(events.length, 1);
+      assert.equal(events[0]?.createdAt, "2025-01-01T00:00:00.000Z");
+    }),
+  );
+
   it.effect("writes provider-native observability records using the session thread id", () =>
     Effect.gen(function* () {
       const nativeEvents: Array<{
@@ -648,7 +753,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           threadId: asThreadId("thread-native-log"),
           runtimeMode: "full-access",
         });
-        yield* sleep(10);
+        yield* advanceTestClock(10);
         return started;
       }).pipe(Effect.provide(adapterLayer));
 
@@ -736,7 +841,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           threadId: asThreadId("thread-native-log-failure"),
           runtimeMode: "full-access",
         });
-        yield* sleep(10);
+        yield* advanceTestClock(10);
         return {
           sessions: yield* adapter.listSessions(),
           closeCallsDuringRun: [...runtimeMock.state.closeCalls],
