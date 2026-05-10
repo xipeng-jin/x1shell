@@ -4,9 +4,11 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 
-import { autoUpdater } from "electron-updater";
+import type { autoUpdater as autoUpdaterType } from "electron-updater";
 
-type AutoUpdater = typeof autoUpdater;
+import { loadElectronUpdater } from "./ElectronRuntime.ts";
+
+type AutoUpdater = typeof autoUpdaterType;
 
 export type ElectronUpdaterFeedUrl = Parameters<AutoUpdater["setFeedURL"]>[0];
 
@@ -70,67 +72,85 @@ export class ElectronUpdater extends Context.Service<ElectronUpdater, ElectronUp
   "t3/desktop/electron/Updater",
 ) {}
 
+const loadAutoUpdater = async () => {
+  const { autoUpdater } = await loadElectronUpdater();
+  return autoUpdater;
+};
+
 export const layer = Layer.succeed(ElectronUpdater, {
   setFeedURL: (options) =>
-    Effect.suspend(() => {
+    Effect.promise(async () => {
+      const autoUpdater = await loadAutoUpdater();
       autoUpdater.setFeedURL(options);
-      return Effect.void;
     }),
   setAutoDownload: (value) =>
-    Effect.suspend(() => {
+    Effect.promise(async () => {
+      const autoUpdater = await loadAutoUpdater();
       autoUpdater.autoDownload = value;
-      return Effect.void;
     }),
   setAutoInstallOnAppQuit: (value) =>
-    Effect.suspend(() => {
+    Effect.promise(async () => {
+      const autoUpdater = await loadAutoUpdater();
       autoUpdater.autoInstallOnAppQuit = value;
-      return Effect.void;
     }),
   setChannel: (channel) =>
-    Effect.suspend(() => {
+    Effect.promise(async () => {
+      const autoUpdater = await loadAutoUpdater();
       autoUpdater.channel = channel;
-      return Effect.void;
     }),
   setAllowPrerelease: (value) =>
-    Effect.suspend(() => {
+    Effect.promise(async () => {
+      const autoUpdater = await loadAutoUpdater();
       autoUpdater.allowPrerelease = value;
-      return Effect.void;
     }),
-  allowDowngrade: Effect.sync(() => autoUpdater.allowDowngrade),
+  allowDowngrade: Effect.promise(async () => {
+    const autoUpdater = await loadAutoUpdater();
+    return autoUpdater.allowDowngrade;
+  }),
   setAllowDowngrade: (value) =>
-    Effect.suspend(() => {
+    Effect.promise(async () => {
+      const autoUpdater = await loadAutoUpdater();
       autoUpdater.allowDowngrade = value;
-      return Effect.void;
     }),
   setDisableDifferentialDownload: (value) =>
-    Effect.suspend(() => {
+    Effect.promise(async () => {
+      const autoUpdater = await loadAutoUpdater();
       autoUpdater.disableDifferentialDownload = value;
-      return Effect.void;
     }),
   checkForUpdates: Effect.tryPromise({
-    try: () => autoUpdater.checkForUpdates(),
+    try: async () => {
+      const autoUpdater = await loadAutoUpdater();
+      return autoUpdater.checkForUpdates();
+    },
     catch: (cause) => new ElectronUpdaterCheckForUpdatesError({ cause }),
   }).pipe(Effect.asVoid),
   downloadUpdate: Effect.tryPromise({
-    try: () => autoUpdater.downloadUpdate(),
+    try: async () => {
+      const autoUpdater = await loadAutoUpdater();
+      return autoUpdater.downloadUpdate();
+    },
     catch: (cause) => new ElectronUpdaterDownloadUpdateError({ cause }),
   }).pipe(Effect.asVoid),
   quitAndInstall: ({ isSilent, isForceRunAfter }) =>
-    Effect.try({
-      try: () => autoUpdater.quitAndInstall(isSilent, isForceRunAfter),
+    Effect.tryPromise({
+      try: async () => {
+        const autoUpdater = await loadAutoUpdater();
+        return autoUpdater.quitAndInstall(isSilent, isForceRunAfter);
+      },
       catch: (cause) => new ElectronUpdaterQuitAndInstallError({ cause }),
     }),
   on: (eventName, listener) => {
-    const eventTarget = autoUpdater as unknown as {
-      on: (eventName: string, listener: (...args: Array<unknown>) => void) => void;
-      removeListener: (eventName: string, listener: (...args: Array<unknown>) => void) => void;
-    };
     const untypedListener = listener as unknown as (...args: Array<unknown>) => void;
     return Effect.acquireRelease(
-      Effect.sync(() => {
+      Effect.promise(async () => {
+        const eventTarget = (await loadAutoUpdater()) as unknown as {
+          on: (eventName: string, listener: (...args: Array<unknown>) => void) => void;
+          removeListener: (eventName: string, listener: (...args: Array<unknown>) => void) => void;
+        };
         eventTarget.on(eventName, untypedListener);
+        return eventTarget;
       }),
-      () =>
+      (eventTarget) =>
         Effect.sync(() => {
           eventTarget.removeListener(eventName, untypedListener);
         }),

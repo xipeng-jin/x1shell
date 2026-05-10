@@ -3,7 +3,9 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 
-import * as Electron from "electron";
+import type * as Electron from "electron";
+
+import { loadElectron } from "./ElectronRuntime.ts";
 
 export interface ElectronAppMetadata {
   readonly appVersion: string;
@@ -47,65 +49,86 @@ const addScopedAppListener = <Args extends ReadonlyArray<unknown>>(
   listener: (...args: Args) => void,
 ): Effect.Effect<void, never, Scope.Scope> =>
   Effect.acquireRelease(
-    Effect.sync(() => {
+    Effect.promise(async () => {
+      const Electron = await loadElectron();
       Electron.app.on(eventName as any, listener as any);
+      return Electron.app;
     }),
-    () =>
+    (app) =>
       Effect.sync(() => {
-        Electron.app.removeListener(eventName as any, listener as any);
+        app.removeListener(eventName as any, listener as any);
       }),
   ).pipe(Effect.asVoid);
 
 const make = ElectronApp.of({
-  metadata: Effect.sync(() => ({
-    appVersion: Electron.app.getVersion(),
-    appPath: Electron.app.getAppPath(),
-    isPackaged: Electron.app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    runningUnderArm64Translation: Electron.app.runningUnderARM64Translation === true,
-  })),
-  name: Effect.sync(() => Electron.app.name),
-  whenReady: Effect.promise(() => Electron.app.whenReady()).pipe(Effect.asVoid),
-  quit: Effect.sync(() => {
+  metadata: Effect.promise(async () => {
+    const Electron = await loadElectron();
+    return {
+      appVersion: Electron.app.getVersion(),
+      appPath: Electron.app.getAppPath(),
+      isPackaged: Electron.app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      runningUnderArm64Translation: Electron.app.runningUnderARM64Translation === true,
+    };
+  }),
+  name: Effect.promise(async () => {
+    const Electron = await loadElectron();
+    return Electron.app.name;
+  }),
+  whenReady: Effect.promise(async () => {
+    const Electron = await loadElectron();
+    await Electron.app.whenReady();
+  }).pipe(Effect.asVoid),
+  quit: Effect.promise(async () => {
+    const Electron = await loadElectron();
     Electron.app.quit();
   }),
   exit: (code) =>
-    Effect.sync(() => {
+    Effect.promise(async () => {
+      const Electron = await loadElectron();
       Electron.app.exit(code);
     }),
   relaunch: (options) =>
-    Effect.sync(() => {
+    Effect.promise(async () => {
+      const Electron = await loadElectron();
       Electron.app.relaunch(options);
     }),
   setPath: (name, path) =>
-    Effect.sync(() => {
+    Effect.promise(async () => {
+      const Electron = await loadElectron();
       Electron.app.setPath(name, path);
     }),
   setName: (name) =>
-    Effect.sync(() => {
+    Effect.promise(async () => {
+      const Electron = await loadElectron();
       Electron.app.setName(name);
     }),
   setAboutPanelOptions: (options) =>
-    Effect.sync(() => {
+    Effect.promise(async () => {
+      const Electron = await loadElectron();
       Electron.app.setAboutPanelOptions(options);
     }),
   setAppUserModelId: (id) =>
-    Effect.sync(() => {
+    Effect.promise(async () => {
+      const Electron = await loadElectron();
       Electron.app.setAppUserModelId(id);
     }),
   setDesktopName: (desktopName) =>
-    Effect.sync(() => {
+    Effect.promise(async () => {
+      const Electron = await loadElectron();
       const linuxApp = Electron.app as Electron.App & {
         setDesktopName?: (desktopName: string) => void;
       };
       linuxApp.setDesktopName?.(desktopName);
     }),
   setDockIcon: (iconPath) =>
-    Effect.sync(() => {
+    Effect.promise(async () => {
+      const Electron = await loadElectron();
       Electron.app.dock?.setIcon(iconPath);
     }),
   appendCommandLineSwitch: (switchName, value) =>
-    Effect.sync(() => {
+    Effect.promise(async () => {
+      const Electron = await loadElectron();
       if (value === undefined) {
         Electron.app.commandLine.appendSwitch(switchName);
         return;

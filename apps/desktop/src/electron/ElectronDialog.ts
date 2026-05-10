@@ -3,7 +3,9 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import * as Electron from "electron";
+import type * as Electron from "electron";
+
+import { loadElectron } from "./ElectronRuntime.ts";
 
 const CONFIRM_BUTTON_INDEX = 1;
 
@@ -43,6 +45,7 @@ const make = ElectronDialog.of({
         defaultPath,
       }),
     });
+    const Electron = yield* Effect.promise(() => loadElectron());
     const result = yield* Option.match(input.owner, {
       onNone: () => Effect.promise(() => Electron.dialog.showOpenDialog(openDialogOptions)),
       onSome: (owner) =>
@@ -68,15 +71,21 @@ const make = ElectronDialog.of({
       noLink: true,
       message: normalizedMessage,
     };
+    const Electron = yield* Effect.promise(() => loadElectron());
     const result = yield* Option.match(input.owner, {
       onNone: () => Effect.promise(() => Electron.dialog.showMessageBox(options)),
       onSome: (owner) => Effect.promise(() => Electron.dialog.showMessageBox(owner, options)),
     });
     return result.response === CONFIRM_BUTTON_INDEX;
   }),
-  showMessageBox: (options) => Effect.promise(() => Electron.dialog.showMessageBox(options)),
+  showMessageBox: (options) =>
+    Effect.promise(async () => {
+      const Electron = await loadElectron();
+      return Electron.dialog.showMessageBox(options);
+    }),
   showErrorBox: (title, content) =>
-    Effect.sync(() => {
+    Effect.promise(async () => {
+      const Electron = await loadElectron();
       Electron.dialog.showErrorBox(title, content);
     }),
 });

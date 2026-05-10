@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import * as Electron from "electron";
+import { loadElectron } from "./ElectronRuntime.ts";
 
 const SAFE_EXTERNAL_PROTOCOLS = new Set(["http:", "https:"]);
 
@@ -34,15 +34,17 @@ const make = ElectronShell.of({
     Option.match(parseSafeExternalUrl(rawUrl), {
       onNone: () => Effect.succeed(false),
       onSome: (externalUrl) =>
-        Effect.promise(() =>
-          Electron.shell.openExternal(externalUrl).then(
+        Effect.promise(async () => {
+          const Electron = await loadElectron();
+          return Electron.shell.openExternal(externalUrl).then(
             () => true,
             () => false,
-          ),
-        ),
+          );
+        }),
     }),
   copyText: (text) =>
-    Effect.sync(() => {
+    Effect.promise(async () => {
+      const Electron = await loadElectron();
       Electron.clipboard.writeText(text);
     }),
 });

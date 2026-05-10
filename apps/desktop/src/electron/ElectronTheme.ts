@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 
-import * as Electron from "electron";
+import { loadElectron } from "./ElectronRuntime.ts";
 
 export interface ElectronThemeShape {
   readonly shouldUseDarkColors: Effect.Effect<boolean>;
@@ -17,21 +17,25 @@ export class ElectronTheme extends Context.Service<ElectronTheme, ElectronThemeS
 ) {}
 
 const make = ElectronTheme.of({
-  shouldUseDarkColors: Effect.sync(() => Electron.nativeTheme.shouldUseDarkColors),
+  shouldUseDarkColors: Effect.promise(async () => {
+    const Electron = await loadElectron();
+    return Electron.nativeTheme.shouldUseDarkColors;
+  }),
   setSource: (theme) =>
-    Effect.suspend(() => {
+    Effect.promise(async () => {
+      const Electron = await loadElectron();
       Electron.nativeTheme.themeSource = theme;
-      return Effect.void;
     }),
   onUpdated: (listener) =>
     Effect.acquireRelease(
-      Effect.suspend(() => {
+      Effect.promise(async () => {
+        const Electron = await loadElectron();
         Electron.nativeTheme.on("updated", listener);
-        return Effect.void;
+        return Electron.nativeTheme;
       }),
-      () =>
+      (nativeTheme) =>
         Effect.suspend(() => {
-          Electron.nativeTheme.removeListener("updated", listener);
+          nativeTheme.removeListener("updated", listener);
           return Effect.void;
         }),
     ),

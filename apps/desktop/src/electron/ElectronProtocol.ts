@@ -8,9 +8,10 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 
-import * as Electron from "electron";
+import type * as Electron from "electron";
 
 import { DesktopEnvironment, type DesktopEnvironmentShape } from "../app/DesktopEnvironment.ts";
+import { loadElectron } from "./ElectronRuntime.ts";
 
 export const DESKTOP_SCHEME = "t3";
 
@@ -69,7 +70,8 @@ export function normalizeDesktopProtocolPathname(rawPath: string): Option.Option
   return Option.some(segments.join("/"));
 }
 
-const registerDesktopSchemePrivileges = Effect.sync(() => {
+const registerDesktopSchemePrivileges = Effect.promise(async () => {
+  const Electron = await loadElectron();
   Electron.protocol.registerSchemesAsPrivileged([
     {
       scheme: DESKTOP_SCHEME,
@@ -177,6 +179,7 @@ const make = Effect.gen(function* () {
 
       const context = yield* Effect.context<R>();
       const runPromise = Effect.runPromiseWith(context);
+      const Electron = yield* Effect.promise(() => loadElectron());
 
       yield* Effect.acquireRelease(
         Effect.try({

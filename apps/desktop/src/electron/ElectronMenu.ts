@@ -4,7 +4,9 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
-import * as Electron from "electron";
+import type * as Electron from "electron";
+
+import { loadElectron } from "./ElectronRuntime.ts";
 
 export interface ElectronMenuPosition {
   readonly x: number;
@@ -76,7 +78,9 @@ const normalizePosition = (
 export const layer = Layer.sync(ElectronMenu, () => {
   let destructiveMenuIconCache: Option.Option<Electron.NativeImage> | undefined;
 
-  const getDestructiveMenuIcon = (): Option.Option<Electron.NativeImage> => {
+  const getDestructiveMenuIcon = (
+    Electron: Awaited<ReturnType<typeof loadElectron>>,
+  ): Option.Option<Electron.NativeImage> => {
     if (process.platform !== "darwin") {
       return Option.none();
     }
@@ -98,6 +102,7 @@ export const layer = Layer.sync(ElectronMenu, () => {
   };
 
   const buildTemplate = (
+    Electron: Awaited<ReturnType<typeof loadElectron>>,
     entries: readonly ContextMenuItem[],
     complete: (selectedItemId: Option.Option<string>) => void,
   ): Electron.MenuItemConstructorOptions[] => {
@@ -115,12 +120,12 @@ export const layer = Layer.sync(ElectronMenu, () => {
         enabled: !item.disabled,
       };
       if (item.children && item.children.length > 0) {
-        itemOption.submenu = buildTemplate(item.children, complete);
+        itemOption.submenu = buildTemplate(Electron, item.children, complete);
       } else {
         itemOption.click = () => complete(Option.some(item.id));
       }
       if (item.destructive && (!item.children || item.children.length === 0)) {
-        const destructiveIcon = getDestructiveMenuIcon();
+        const destructiveIcon = getDestructiveMenuIcon(Electron);
         if (Option.isSome(destructiveIcon)) {
           itemOption.icon = destructiveIcon.value;
         }
@@ -134,48 +139,59 @@ export const layer = Layer.sync(ElectronMenu, () => {
 
   return ElectronMenu.of({
     setApplicationMenu: (template) =>
-      Effect.sync(() => {
+      Effect.promise(async () => {
+        const Electron = await loadElectron();
         Electron.Menu.setApplicationMenu(Electron.Menu.buildFromTemplate([...template]));
       }),
     popupTemplate: (input) =>
-      Effect.sync(() => {
+      Effect.promise(async () => {
         if (input.template.length === 0) {
           return;
         }
+        const Electron = await loadElectron();
         Electron.Menu.buildFromTemplate([...input.template]).popup({ window: input.window });
       }),
     showContextMenu: (input) =>
       Effect.callback<Option.Option<string>>((resume) => {
-        const normalizedItems = normalizeContextMenuItems(input.items);
-        if (normalizedItems.length === 0) {
-          resume(Effect.succeed(Option.none()));
-          return;
-        }
+        void (async () => {
+          try {
+            const Electron = await loadElectron();
+            const normalizedItems = normalizeContextMenuItems(input.items);
+            if (normalizedItems.length === 0) {
+              resume(Effect.succeed(Option.none()));
+              return;
+            }
 
-        let completed = false;
-        const complete = (selectedItemId: Option.Option<string>) => {
-          if (completed) {
-            return;
+            let completed = false;
+            const complete = (selectedItemId: Option.Option<string>) => {
+              if (completed) {
+                return;
+              }
+              completed = true;
+              resume(Effect.succeed(selectedItemId));
+            };
+
+            const menu = Electron.Menu.buildFromTemplate(
+              buildTemplate(Electron, normalizedItems, complete),
+            );
+            const popupPosition = normalizePosition(input.position);
+            const popupOptions = Option.match(popupPosition, {
+              onNone: (): Electron.PopupOptions => ({
+                window: input.window,
+                callback: () => complete(Option.none()),
+              }),
+              onSome: (position): Electron.PopupOptions => ({
+                window: input.window,
+                x: position.x,
+                y: position.y,
+                callback: () => complete(Option.none()),
+              }),
+            });
+            menu.popup(popupOptions);
+          } catch (cause) {
+            resume(Effect.die(cause));
           }
-          completed = true;
-          resume(Effect.succeed(selectedItemId));
-        };
-
-        const menu = Electron.Menu.buildFromTemplate(buildTemplate(normalizedItems, complete));
-        const popupPosition = normalizePosition(input.position);
-        const popupOptions = Option.match(popupPosition, {
-          onNone: (): Electron.PopupOptions => ({
-            window: input.window,
-            callback: () => complete(Option.none()),
-          }),
-          onSome: (position): Electron.PopupOptions => ({
-            window: input.window,
-            x: position.x,
-            y: position.y,
-            callback: () => complete(Option.none()),
-          }),
-        });
-        menu.popup(popupOptions);
+        })();
       }),
   });
 });

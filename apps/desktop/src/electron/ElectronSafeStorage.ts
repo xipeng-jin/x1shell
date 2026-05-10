@@ -3,7 +3,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import * as Electron from "electron";
+import { loadElectron } from "./ElectronRuntime.ts";
 
 export class ElectronSafeStorageAvailabilityError extends Data.TaggedError(
   "ElectronSafeStorageAvailabilityError",
@@ -51,18 +51,27 @@ export class ElectronSafeStorage extends Context.Service<
 >()("@t3tools/desktop/ElectronSafeStorage") {}
 
 const make = ElectronSafeStorage.of({
-  isEncryptionAvailable: Effect.try({
-    try: () => Electron.safeStorage.isEncryptionAvailable(),
+  isEncryptionAvailable: Effect.tryPromise({
+    try: async () => {
+      const Electron = await loadElectron();
+      return Electron.safeStorage.isEncryptionAvailable();
+    },
     catch: (cause) => new ElectronSafeStorageAvailabilityError({ cause }),
   }),
   encryptString: (value) =>
-    Effect.try({
-      try: () => Electron.safeStorage.encryptString(value),
+    Effect.tryPromise({
+      try: async () => {
+        const Electron = await loadElectron();
+        return Electron.safeStorage.encryptString(value);
+      },
       catch: (cause) => new ElectronSafeStorageEncryptError({ cause }),
     }),
   decryptString: (value) =>
-    Effect.try({
-      try: () => Electron.safeStorage.decryptString(Buffer.from(value)),
+    Effect.tryPromise({
+      try: async () => {
+        const Electron = await loadElectron();
+        return Electron.safeStorage.decryptString(Buffer.from(value));
+      },
       catch: (cause) => new ElectronSafeStorageDecryptError({ cause }),
     }),
 });

@@ -5,7 +5,9 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 
-import * as Electron from "electron";
+import type * as Electron from "electron";
+
+import { loadElectron } from "./ElectronRuntime.ts";
 
 export class ElectronWindowCreateError extends Data.TaggedError("ElectronWindowCreateError")<{
   readonly cause: unknown;
@@ -49,16 +51,18 @@ const make = Effect.gen(function* () {
       return main;
     }
 
+    const Electron = yield* Effect.promise(() => loadElectron());
     return Option.fromNullishOr(Electron.BrowserWindow.getAllWindows()[0] ?? null).pipe(
       Option.filter((window) => !window.isDestroyed()),
     );
   });
 
-  const focusedMainOrFirst = Effect.sync(() =>
-    Option.fromNullishOr(Electron.BrowserWindow.getFocusedWindow() ?? null).pipe(
+  const focusedMainOrFirst = Effect.promise(async () => {
+    const Electron = await loadElectron();
+    return Option.fromNullishOr(Electron.BrowserWindow.getFocusedWindow() ?? null).pipe(
       Option.filter((window) => !window.isDestroyed()),
-    ),
-  ).pipe(
+    );
+  }).pipe(
     Effect.flatMap((focused) =>
       Option.isSome(focused) ? Effect.succeed(focused) : currentMainOrFirst,
     ),
@@ -66,8 +70,11 @@ const make = Effect.gen(function* () {
 
   return ElectronWindow.of({
     create: (options) =>
-      Effect.try({
-        try: () => new Electron.BrowserWindow(options),
+      Effect.tryPromise({
+        try: async () => {
+          const Electron = await loadElectron();
+          return new Electron.BrowserWindow(options);
+        },
         catch: (cause) => new ElectronWindowCreateError({ cause }),
       }),
     main: liveMain,
@@ -85,7 +92,7 @@ const make = Effect.gen(function* () {
         return Option.none();
       }),
     reveal: (window) =>
-      Effect.sync(() => {
+      Effect.promise(async () => {
         if (window.isDestroyed()) {
           return;
         }
@@ -99,13 +106,15 @@ const make = Effect.gen(function* () {
         }
 
         if (process.platform === "darwin") {
+          const Electron = await loadElectron();
           Electron.app.focus({ steal: true });
         }
 
         window.focus();
       }),
     sendAll: (channel, ...args) =>
-      Effect.sync(() => {
+      Effect.promise(async () => {
+        const Electron = await loadElectron();
         for (const window of Electron.BrowserWindow.getAllWindows()) {
           if (window.isDestroyed()) {
             continue;
@@ -113,7 +122,8 @@ const make = Effect.gen(function* () {
           window.webContents.send(channel, ...args);
         }
       }),
-    destroyAll: Effect.sync(() => {
+    destroyAll: Effect.promise(async () => {
+      const Electron = await loadElectron();
       for (const window of Electron.BrowserWindow.getAllWindows()) {
         window.destroy();
       }
@@ -121,6 +131,7 @@ const make = Effect.gen(function* () {
     syncAllAppearance: Effect.fn("desktop.electron.window.syncAllAppearance")(function* <E, R>(
       sync: (window: Electron.BrowserWindow) => Effect.Effect<void, E, R>,
     ) {
+      const Electron = yield* Effect.promise(() => loadElectron());
       const windows = Electron.BrowserWindow.getAllWindows();
       for (const window of windows) {
         if (window.isDestroyed()) {
