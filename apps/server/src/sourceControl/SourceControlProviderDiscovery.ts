@@ -143,7 +143,7 @@ function probeCli(input: {
       cwd: input.cwd,
       timeoutMs: 5_000,
       maxOutputBytes: 8_000,
-      truncateOutputAtMaxBytes: true,
+      appendTruncationMarker: true,
     })
     .pipe(
       Effect.map(
@@ -223,7 +223,7 @@ export function probeSourceControlProvider(input: {
               cwd: input.cwd,
               timeoutMs: 5_000,
               maxOutputBytes: 8_000,
-              truncateOutputAtMaxBytes: true,
+              appendTruncationMarker: true,
             })
             .pipe(Effect.mapError(() => check.failureDetail)),
         { discard: true },
@@ -238,7 +238,7 @@ export function probeSourceControlProvider(input: {
           allowNonZeroExit: true,
           timeoutMs: 5_000,
           maxOutputBytes: 8_000,
-          truncateOutputAtMaxBytes: true,
+          appendTruncationMarker: true,
         })
         .pipe(
           Effect.map(
