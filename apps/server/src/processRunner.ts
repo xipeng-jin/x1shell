@@ -244,6 +244,7 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
             }
           : {}),
         ...(input.shell !== undefined ? { shell: input.shell } : {}),
+        ...(input.stdin === undefined ? { stdin: { stream: Stream.empty, endOnDone: true } } : {}),
       }),
     )
     .pipe(

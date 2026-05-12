@@ -1,3 +1,4 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -272,6 +273,32 @@ describe("runProcess", () => {
 
       expect(result.stdout).toBe("stdin payload");
       expect(result.code).toBe(0);
+    }),
+  );
+
+  it.effect("closes stdin when no stdin payload is provided", () =>
+    Effect.gen(function* () {
+      const result = yield* Effect.service(ProcessRunner).pipe(
+        Effect.flatMap((runner) =>
+          runner.run({
+            command: process.execPath,
+            args: [
+              "-e",
+              [
+                "setTimeout(() => process.exit(7), 5000);",
+                "process.stdin.on('end', () => process.exit(0));",
+                "process.stdin.resume();",
+              ].join(""),
+            ],
+            cwd: process.cwd(),
+            timeout: "1 second",
+          }),
+        ),
+        Effect.provide(ProcessRunnerLive.pipe(Layer.provide(NodeServices.layer))),
+      );
+
+      expect(result.code).toBe(0);
+      expect(result.timedOut).toBe(false);
     }),
   );
 
