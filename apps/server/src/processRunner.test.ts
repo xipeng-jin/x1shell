@@ -4,6 +4,8 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as PlatformError from "effect/PlatformError";
+import * as Ref from "effect/Ref";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
@@ -34,12 +36,14 @@ function makeHandle(input: {
   readonly code?: number;
   readonly stdin?: ChildProcessSpawner.ChildProcessHandle["stdin"];
   readonly exitCode?: Effect.Effect<ChildProcessSpawner.ExitCode>;
+  readonly isRunning?: ChildProcessSpawner.ChildProcessHandle["isRunning"];
+  readonly kill?: ChildProcessSpawner.ChildProcessHandle["kill"];
 }) {
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(1),
     exitCode: input.exitCode ?? Effect.succeed(ChildProcessSpawner.ExitCode(input.code ?? 0)),
-    isRunning: Effect.succeed(false),
-    kill: () => Effect.void,
+    isRunning: input.isRunning ?? Effect.succeed(false),
+    kill: input.kill ?? (() => Effect.void),
     unref: Effect.succeed(Effect.void),
     stdin: input.stdin ?? Sink.drain,
     stdout:
@@ -53,6 +57,17 @@ function makeHandle(input: {
     all: Stream.empty,
     getInputFd: () => Sink.drain,
     getOutputFd: () => Stream.empty,
+  });
+}
+
+function makeKillTrackedHandle(
+  input: Parameters<typeof makeHandle>[0],
+  killCalls: Ref.Ref<number>,
+) {
+  return makeHandle({
+    ...input,
+    isRunning: input.isRunning ?? Effect.succeed(true),
+    kill: () => Ref.update(killCalls, (current) => current + 1),
   });
 }
 
@@ -100,6 +115,31 @@ describe("runProcess", () => {
     }),
   );
 
+  it.effect("does not kill a normally completed process", () =>
+    Effect.gen(function* () {
+      const killCalls = yield* Ref.make(0);
+      const spawner = makeSpawner(() =>
+        Effect.succeed(
+          makeKillTrackedHandle(
+            {
+              stdout: "ok",
+              isRunning: Effect.succeed(false),
+            },
+            killCalls,
+          ),
+        ),
+      );
+
+      const result = yield* runWith(spawner)({
+        command: "fake",
+        args: ["ok"],
+      });
+
+      expect(result.stdout).toBe("ok");
+      expect(yield* Ref.get(killCalls)).toBe(0);
+    }),
+  );
+
   it.effect("runs through the ProcessRunner service", () => {
     const spawner = makeSpawner((command) =>
       Effect.sync(() => {
@@ -134,6 +174,31 @@ describe("runProcess", () => {
       }).pipe(Effect.flip);
 
       expect(error).toBeInstanceOf(ProcessOutputLimitError);
+    }),
+  );
+
+  it.effect("kills the process when output exceeds max buffer in default mode", () =>
+    Effect.gen(function* () {
+      const killCalls = yield* Ref.make(0);
+      const spawner = makeSpawner(() =>
+        Effect.succeed(
+          makeKillTrackedHandle(
+            {
+              stdout: "x".repeat(2048),
+            },
+            killCalls,
+          ),
+        ),
+      );
+
+      const error = yield* runWith(spawner)({
+        command: "fake",
+        args: ["stdout-bytes", "2048"],
+        maxOutputBytes: 128,
+      }).pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(ProcessOutputLimitError);
+      expect(yield* Ref.get(killCalls)).toBe(1);
     }),
   );
 
@@ -247,6 +312,74 @@ describe("runProcess", () => {
     }),
   );
 
+  it.effect("kills the process when timeoutBehavior is error", () =>
+    Effect.gen(function* () {
+      const killCalls = yield* Ref.make(0);
+      const killOptions = yield* Ref.make<unknown>(null);
+      const spawner = makeSpawner(() =>
+        Effect.succeed(
+          makeHandle({
+            exitCode: Effect.never,
+            isRunning: Effect.succeed(true),
+            kill: (options) =>
+              Ref.set(killOptions, options).pipe(
+                Effect.andThen(Ref.update(killCalls, (current) => current + 1)),
+              ),
+          }),
+        ),
+      );
+      const errorFiber = yield* runWith(spawner)({
+        command: "fake",
+        args: ["sleep"],
+        timeout: "50 millis",
+      }).pipe(Effect.flip, Effect.forkScoped);
+
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust(Duration.millis(50));
+      const error = yield* Fiber.join(errorFiber);
+
+      expect(error).toBeInstanceOf(ProcessTimeoutError);
+      expect(yield* Ref.get(killCalls)).toBe(1);
+      expect(yield* Ref.get(killOptions)).toEqual({ forceKillAfter: "1 second" });
+    }),
+  );
+
+  it.effect("kills the process when checking whether it is running fails", () =>
+    Effect.gen(function* () {
+      const killCalls = yield* Ref.make(0);
+      const spawner = makeSpawner(() =>
+        Effect.succeed(
+          makeKillTrackedHandle(
+            {
+              exitCode: Effect.never,
+              isRunning: Effect.fail(
+                PlatformError.systemError({
+                  _tag: "Unknown",
+                  module: "ChildProcess",
+                  method: "isRunning",
+                  description: "liveness check failed",
+                }),
+              ),
+            },
+            killCalls,
+          ),
+        ),
+      );
+      const errorFiber = yield* runWith(spawner)({
+        command: "fake",
+        args: ["sleep"],
+        timeout: "50 millis",
+      }).pipe(Effect.flip, Effect.forkScoped);
+
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust(Duration.millis(50));
+      const error = yield* Fiber.join(errorFiber);
+
+      expect(error).toBeInstanceOf(ProcessTimeoutError);
+      expect(yield* Ref.get(killCalls)).toBe(1);
+    }),
+  );
+
   it.effect("returns a synthetic timed out result when timeoutBehavior is timedOutResult", () =>
     Effect.gen(function* () {
       const spawner = makeSpawner(() =>
@@ -275,6 +408,60 @@ describe("runProcess", () => {
         stdoutTruncated: false,
         stderrTruncated: false,
       });
+    }),
+  );
+
+  it.effect("kills the process when timeoutBehavior is timedOutResult", () =>
+    Effect.gen(function* () {
+      const killCalls = yield* Ref.make(0);
+      const spawner = makeSpawner(() =>
+        Effect.succeed(
+          makeKillTrackedHandle(
+            {
+              exitCode: Effect.never,
+            },
+            killCalls,
+          ),
+        ),
+      );
+      const resultFiber = yield* runWith(spawner)({
+        command: "fake",
+        args: ["sleep"],
+        timeout: "50 millis",
+        timeoutBehavior: "timedOutResult",
+      }).pipe(Effect.forkScoped);
+
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust(Duration.millis(50));
+      const result = yield* Fiber.join(resultFiber);
+
+      expect(result.timedOut).toBe(true);
+      expect(yield* Ref.get(killCalls)).toBe(1);
+    }),
+  );
+
+  it.effect("kills the process when the run fiber is interrupted", () =>
+    Effect.gen(function* () {
+      const killCalls = yield* Ref.make(0);
+      const spawner = makeSpawner(() =>
+        Effect.succeed(
+          makeKillTrackedHandle(
+            {
+              exitCode: Effect.never,
+            },
+            killCalls,
+          ),
+        ),
+      );
+      const fiber = yield* runWith(spawner)({
+        command: "fake",
+        args: ["sleep"],
+      }).pipe(Effect.forkScoped);
+
+      yield* Effect.yieldNow;
+      yield* Fiber.interrupt(fiber);
+
+      expect(yield* Ref.get(killCalls)).toBe(1);
     }),
   );
 });

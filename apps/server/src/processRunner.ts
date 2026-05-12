@@ -95,6 +95,7 @@ export class ProcessRunner extends Context.Service<ProcessRunner, ProcessRunnerS
 
 const DEFAULT_TIMEOUT = "60 seconds";
 const DEFAULT_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+const PROCESS_KILL_FORCE_AFTER = "1 second";
 
 const WINDOWS_COMMAND_NOT_FOUND_PATTERNS = [
   /is not recognized as an internal or external command/i,
@@ -256,6 +257,16 @@ const runProcessCore = Effect.fn("processRunner.runProcessCore")(function* (
           }),
       ),
     );
+  yield* Effect.addFinalizer(() =>
+    child.isRunning.pipe(
+      Effect.catch(() => Effect.succeed(true)),
+      Effect.flatMap((isRunning) =>
+        isRunning
+          ? child.kill({ forceKillAfter: PROCESS_KILL_FORCE_AFTER }).pipe(Effect.ignore)
+          : Effect.void,
+      ),
+    ),
+  );
 
   const writeStdin =
     input.stdin === undefined
