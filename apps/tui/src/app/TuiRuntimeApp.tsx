@@ -28,6 +28,7 @@ export function TuiRuntimeApp(props: {
   onGetTurnDiff?: Parameters<typeof App>[0]["onGetTurnDiff"];
   onGetFullThreadDiff?: Parameters<typeof App>[0]["onGetFullThreadDiff"];
   onRefreshVcsStatus?: Parameters<typeof App>[0]["onRefreshVcsStatus"];
+  onBrowseFilesystem?: Parameters<typeof App>[0]["onBrowseFilesystem"];
   onRequestExit: () => void;
 }) {
   const serverStatus = useSyncExternalStore(
@@ -82,6 +83,7 @@ export function TuiRuntimeApp(props: {
       {...(props.onGetTurnDiff ? { onGetTurnDiff: props.onGetTurnDiff } : {})}
       {...(props.onGetFullThreadDiff ? { onGetFullThreadDiff: props.onGetFullThreadDiff } : {})}
       {...(props.onRefreshVcsStatus ? { onRefreshVcsStatus: props.onRefreshVcsStatus } : {})}
+      {...(props.onBrowseFilesystem ? { onBrowseFilesystem: props.onBrowseFilesystem } : {})}
       onRequestExit={props.onRequestExit}
     />
   );

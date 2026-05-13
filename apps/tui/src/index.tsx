@@ -366,6 +366,11 @@ async function runInteractive(
           if (!controller) return Promise.reject(new Error("Not connected."));
           return controller.refreshVcsStatus(cwd);
         }}
+        onBrowseFilesystem={(input) => {
+          debugBuffer.push("info", "browse filesystem", { partialPath: input.partialPath });
+          if (!controller) return Promise.reject(new Error("Not connected."));
+          return controller.browseFilesystem(input);
+        }}
         onRequestExit={() => void shutdown(0)}
       />,
     );

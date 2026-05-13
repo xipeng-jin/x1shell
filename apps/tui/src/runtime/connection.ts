@@ -84,6 +84,7 @@ export interface TuiConnectionController {
   ) => Promise<OrchestrationGetFullThreadDiffResult>;
   readonly refreshProviders: WsRpcClient["server"]["refreshProviders"];
   readonly updateSettings: WsRpcClient["server"]["updateSettings"];
+  readonly browseFilesystem: WsRpcClient["filesystem"]["browse"];
   readonly refreshVcsStatus: (cwd: string) => Promise<VcsStatusResult>;
   readonly dispose: () => Promise<void>;
 }
@@ -389,6 +390,10 @@ export function createTuiConnectionController(input: {
     updateSettings: (patch: ServerSettingsPatch) => {
       if (!current) return Promise.reject(new Error("Not connected."));
       return current.client.server.updateSettings(patch);
+    },
+    browseFilesystem: (browseInput) => {
+      if (!current) return Promise.reject(new Error("Not connected."));
+      return current.client.filesystem.browse(browseInput);
     },
     refreshVcsStatus: (cwd) => {
       if (!current) return Promise.reject(new Error("Not connected."));

@@ -66,6 +66,25 @@ describe("CommandPalette", () => {
     expect(text).toContain("repo-11");
     expect(text).not.toContain("Filesystem browsing starts in a later phase.");
   });
+
+  it("renders sanitized Add Project browse errors without the placeholder", () => {
+    const palette = CommandPalette({
+      view: buildAddProjectBrowsePaletteView({
+        query: "~/Code/",
+        error: "Failed token=secret \u001b]8;;https://evil.example\u0007link",
+      }),
+      selectedIndex: 0,
+      theme: resolveTheme("dark"),
+    });
+    const text = flattenText(palette);
+
+    expect(text).toContain("Failed");
+    expect(text).toContain("link");
+    expect(text).not.toContain("token=secret");
+    expect(text).not.toContain("\u001b]8");
+    expect(text).not.toContain("evil.example");
+    expect(text).not.toContain("Filesystem browsing starts in a later phase.");
+  });
 });
 
 function flattenText(node: ReactNode): string {

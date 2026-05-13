@@ -127,6 +127,47 @@ describe("TUI connection runtime", () => {
     ).resolves.toBe("wss://remote.example.com/ws?debug=1&wsToken=issued-token");
   });
 
+  it("forwards filesystem browse through the active RPC client", async () => {
+    const store = createServerConfigStore();
+    const browse = vi.fn().mockResolvedValue({
+      parentPath: "/repo",
+      entries: [{ name: "x1shell", fullPath: "/repo/x1shell" }],
+    });
+    const controller = createTuiConnectionController({
+      target: attachTarget(),
+      store,
+      createConnection: () =>
+        fakeConnection({
+          shellSnapshot: shellSnapshot(1, "thread-a"),
+          browse,
+        }),
+    });
+
+    await controller.connect();
+
+    await expect(controller.browseFilesystem({ partialPath: "/repo" })).resolves.toEqual({
+      parentPath: "/repo",
+      entries: [{ name: "x1shell", fullPath: "/repo/x1shell" }],
+    });
+    expect(browse).toHaveBeenCalledWith({ partialPath: "/repo" });
+
+    await controller.dispose();
+  });
+
+  it("rejects filesystem browse when disconnected", async () => {
+    const controller = createTuiConnectionController({
+      target: attachTarget(),
+      store: createServerConfigStore(),
+      createConnection: () => fakeConnection({ shellSnapshot: shellSnapshot(1, "thread-a") }),
+    });
+
+    await expect(controller.browseFilesystem({ partialPath: "/repo" })).rejects.toThrow(
+      "Not connected.",
+    );
+
+    await controller.dispose();
+  });
+
   it("recreates RPC state, reissues URL providers, and replaces shell snapshots on reconnect", async () => {
     const store = createServerConfigStore();
     const snapshots = [shellSnapshot(1, "thread-a"), shellSnapshot(2, "thread-b")];
@@ -719,6 +760,7 @@ function fakeConnection(input: {
   readonly config?: unknown;
   readonly configPromise?: Promise<unknown>;
   readonly configEvent?: unknown;
+  readonly browse?: (input: unknown) => Promise<unknown>;
   readonly dispose?: () => void;
   readonly subscribeShell?: (listener: (item: unknown) => void) => () => void;
   readonly subscribeThread?: (threadId: string, listener: (item: unknown) => void) => () => void;
@@ -757,6 +799,9 @@ function fakeConnection(input: {
           });
           return input.subscribeThread?.(request.threadId, listener) ?? (() => undefined);
         },
+      },
+      filesystem: {
+        browse: input.browse ?? (() => Promise.resolve({ parentPath: "/", entries: [] })),
       },
     } as never,
     transport: {} as never,

@@ -46,6 +46,8 @@ describe("paletteViewModel", () => {
       mode: "add-project-browse",
       title: "Add project / Local folder",
       query: "~/Projects/",
+      loading: false,
+      error: null,
       items: [],
     });
   });

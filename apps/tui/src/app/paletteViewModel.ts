@@ -32,6 +32,8 @@ export interface TuiPaletteViewModel {
   readonly title: string;
   readonly query: string;
   readonly groupLabel?: string;
+  readonly loading?: boolean;
+  readonly error?: string | null;
   readonly items: readonly TuiPaletteItem[];
 }
 
@@ -75,11 +77,15 @@ export function buildAddProjectBrowsePaletteView(input: {
     TuiPaletteItem,
     { readonly kind: "browse-directory" | "browse-up" }
   >[];
+  readonly loading?: boolean;
+  readonly error?: string | null;
 }): TuiPaletteViewModel {
   return {
     mode: "add-project-browse",
     title: "Add project / Local folder",
     query: input.query,
+    loading: input.loading ?? false,
+    error: input.error ?? null,
     items: input.items ?? [],
   };
 }

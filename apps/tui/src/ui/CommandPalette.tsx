@@ -51,6 +51,12 @@ export function CommandPalette(props: {
           {props.view.title}
         </text>
         <text fg={props.theme.palette.text}>{displayText(props.view.query)}</text>
+        {props.view.error ? (
+          <text fg={props.theme.palette.danger}>{displayText(props.view.error)}</text>
+        ) : null}
+        {props.view.loading ? (
+          <text fg={props.theme.palette.muted}>Browsing filesystem...</text>
+        ) : null}
         {props.view.items.map((item, index) =>
           isBrowseItem(item) ? (
             <text
@@ -68,8 +74,8 @@ export function CommandPalette(props: {
             </text>
           ) : null,
         )}
-        {props.view.items.length === 0 ? (
-          <text fg={props.theme.palette.muted}>Filesystem browsing starts in a later phase.</text>
+        {props.view.items.length === 0 && !props.view.loading && !props.view.error ? (
+          <text fg={props.theme.palette.muted}>No directories found.</text>
         ) : null}
       </box>
     );
