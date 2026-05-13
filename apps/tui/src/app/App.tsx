@@ -340,9 +340,8 @@ export function App(props: {
       filterBrowseEntries({
         browseEntries: addProjectBrowseEntries,
         browseFilterQuery,
-        highlightedItemValue: addProjectBrowseHighlightedItemValue,
       }).filteredEntries,
-    [addProjectBrowseEntries, addProjectBrowseHighlightedItemValue, browseFilterQuery],
+    [addProjectBrowseEntries, browseFilterQuery],
   );
   const browsePaletteItems = useMemo(
     () => browseItemsForQuery({ query: addProjectBrowseQuery, entries: browseFilteredEntries }),

@@ -172,7 +172,6 @@ describe("TUI filesystem browse helpers", () => {
       filterBrowseEntries({
         browseEntries: entries,
         browseFilterQuery: "src",
-        highlightedItemValue: null,
       }).filteredEntries.map((entry) => entry.name),
     ).toEqual(["src", "src-ui"]);
 
@@ -180,7 +179,6 @@ describe("TUI filesystem browse helpers", () => {
       filterBrowseEntries({
         browseEntries: entries,
         browseFilterQuery: ".s",
-        highlightedItemValue: null,
       }).filteredEntries.map((entry) => entry.name),
     ).toEqual([".src-cache"]);
   });
@@ -195,7 +193,6 @@ describe("TUI filesystem browse helpers", () => {
       filterBrowseEntries({
         browseEntries: entries,
         browseFilterQuery: "",
-        highlightedItemValue: null,
       }).filteredEntries.map((entry) => entry.name),
     ).toEqual(["config"]);
 
@@ -203,7 +200,6 @@ describe("TUI filesystem browse helpers", () => {
       filterBrowseEntries({
         browseEntries: entries,
         browseFilterQuery: ".c",
-        highlightedItemValue: null,
       }).filteredEntries.map((entry) => entry.name),
     ).toEqual([".config"]);
   });
@@ -218,32 +214,29 @@ describe("TUI filesystem browse helpers", () => {
       filterBrowseEntries({
         browseEntries: entries,
         browseFilterQuery: "src",
-        highlightedItemValue: null,
       }).filteredEntries,
     ).toHaveLength(12);
   });
 
-  it("resolves browse highlight by stable full path", () => {
+  it("keeps browse filtering independent from highlight movement", () => {
     const entries = [
       { name: "src", fullPath: "/repo/src" },
       { name: "scripts", fullPath: "/repo/scripts" },
     ];
 
-    expect(
-      filterBrowseEntries({
-        browseEntries: entries,
-        browseFilterQuery: "s",
-        highlightedItemValue: "browse:/repo/scripts",
-      }).highlightedEntry,
-    ).toEqual({ name: "scripts", fullPath: "/repo/scripts" });
+    const filteredEntries = filterBrowseEntries({
+      browseEntries: entries,
+      browseFilterQuery: "s",
+    }).filteredEntries;
 
-    expect(
-      filterBrowseEntries({
-        browseEntries: entries,
-        browseFilterQuery: "src",
-        highlightedItemValue: "browse:/repo/scripts",
-      }).highlightedEntry,
-    ).toBeNull();
+    const nextHighlight = moveBrowseHighlight({
+      items: browseEntriesToPaletteItems(filteredEntries),
+      highlightedItemValue: "browse:/repo/src",
+      direction: 1,
+    });
+
+    expect(filteredEntries).toEqual(entries);
+    expect(nextHighlight).toBe("browse:/repo/scripts");
   });
 
   it("moves browse highlight manually through the full item list", () => {

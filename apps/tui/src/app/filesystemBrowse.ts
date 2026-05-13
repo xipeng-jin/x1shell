@@ -169,10 +169,8 @@ export function isPrimaryEnterModifier(input: {
 export function filterBrowseEntries(input: {
   readonly browseEntries: readonly FilesystemBrowseEntry[];
   readonly browseFilterQuery: string;
-  readonly highlightedItemValue: string | null;
 }): {
   readonly filteredEntries: FilesystemBrowseEntry[];
-  readonly highlightedEntry: FilesystemBrowseEntry | null;
 } {
   const lowerFilter = input.browseFilterQuery.toLowerCase();
   const showHidden = input.browseFilterQuery.startsWith(".");
@@ -183,14 +181,7 @@ export function filterBrowseEntries(input: {
       (showHidden || !entry.name.startsWith(".")),
   );
 
-  const highlightedPath = input.highlightedItemValue?.startsWith("browse:")
-    ? input.highlightedItemValue.slice("browse:".length)
-    : null;
-  const highlightedEntry = highlightedPath
-    ? (filteredEntries.find((entry) => entry.fullPath === highlightedPath) ?? null)
-    : null;
-
-  return { filteredEntries, highlightedEntry };
+  return { filteredEntries };
 }
 
 export function moveBrowseHighlight(input: {
