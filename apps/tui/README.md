@@ -42,7 +42,7 @@ Package-level checks:
 
 ```sh
 bun run --filter @x1shell/tui typecheck
-bun run --filter @x1shell/tui test
+(cd apps/tui && bun run test)
 bun run --filter @x1shell/tui build
 ```
 
