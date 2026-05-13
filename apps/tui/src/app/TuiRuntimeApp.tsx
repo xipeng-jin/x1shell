@@ -20,6 +20,7 @@ export function TuiRuntimeApp(props: {
   onSelectProject?: (projectId: ProjectId) => void;
   onSelectThread?: (threadId: ThreadId) => void;
   onCreateProjectDraft?: (projectId: ProjectId) => void;
+  onCreatePendingProjectDraft?: Parameters<typeof App>[0]["onCreatePendingProjectDraft"];
   onSelectNextThread?: (direction: 1 | -1) => void;
   onNewThread?: () => void;
   onSubmitCommand?: Parameters<typeof App>[0]["onSubmitCommand"];
@@ -29,7 +30,6 @@ export function TuiRuntimeApp(props: {
   onGetFullThreadDiff?: Parameters<typeof App>[0]["onGetFullThreadDiff"];
   onRefreshVcsStatus?: Parameters<typeof App>[0]["onRefreshVcsStatus"];
   onBrowseFilesystem?: Parameters<typeof App>[0]["onBrowseFilesystem"];
-  onSubmitAddProjectBrowsePath?: Parameters<typeof App>[0]["onSubmitAddProjectBrowsePath"];
   onRequestExit: () => void;
 }) {
   const serverStatus = useSyncExternalStore(
@@ -66,6 +66,9 @@ export function TuiRuntimeApp(props: {
       onSelectProject={(projectId) => props.onSelectProject?.(projectId)}
       onSelectThread={(threadId) => props.onSelectThread?.(threadId)}
       onCreateProjectDraft={(projectId) => props.onCreateProjectDraft?.(projectId)}
+      {...(props.onCreatePendingProjectDraft
+        ? { onCreatePendingProjectDraft: props.onCreatePendingProjectDraft }
+        : {})}
       {...(props.onSelectNextThread ? { onSelectNextThread: props.onSelectNextThread } : {})}
       {...(props.onNewThread ? { onNewThread: props.onNewThread } : {})}
       onDraftChange={(projectId, draft) => props.orchestrationStore.setDraft(projectId, draft)}
@@ -85,9 +88,6 @@ export function TuiRuntimeApp(props: {
       {...(props.onGetFullThreadDiff ? { onGetFullThreadDiff: props.onGetFullThreadDiff } : {})}
       {...(props.onRefreshVcsStatus ? { onRefreshVcsStatus: props.onRefreshVcsStatus } : {})}
       {...(props.onBrowseFilesystem ? { onBrowseFilesystem: props.onBrowseFilesystem } : {})}
-      {...(props.onSubmitAddProjectBrowsePath
-        ? { onSubmitAddProjectBrowsePath: props.onSubmitAddProjectBrowsePath }
-        : {})}
       onRequestExit={props.onRequestExit}
     />
   );

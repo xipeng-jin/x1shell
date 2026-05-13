@@ -18,6 +18,11 @@ export interface TuiDraftContext {
   readonly interactionMode?: ProviderInteractionMode;
 }
 
+export interface TuiPendingProjectDraft {
+  readonly workspaceRoot: string;
+  readonly title: string;
+}
+
 export interface TuiShellState {
   readonly projects: ReadonlyArray<OrchestrationProjectShell>;
   readonly threads: ReadonlyArray<OrchestrationThreadShell>;
@@ -29,6 +34,7 @@ export interface TuiShellState {
   readonly draftContextByProjectId: Readonly<Record<string, TuiDraftContext>>;
   readonly draftAttachmentsByProjectId: Readonly<Record<string, readonly UploadChatAttachment[]>>;
   readonly pendingDraftThreadIdByProjectId: Readonly<Record<string, ThreadId>>;
+  readonly pendingProjectDraftByProjectId: Readonly<Record<string, TuiPendingProjectDraft>>;
 }
 
 export type TuiShellListener = (state: TuiShellState) => void;
@@ -50,6 +56,7 @@ export function createOrchestrationStore(
     draftContextByProjectId: {},
     draftAttachmentsByProjectId: {},
     pendingDraftThreadIdByProjectId: {},
+    pendingProjectDraftByProjectId: {},
     ...initialState,
   };
   const listeners = new Set<TuiShellListener>();
@@ -123,6 +130,24 @@ export function createOrchestrationStore(
         projectId ?? state.selectedProjectId ?? state.projects[0]?.id ?? null;
       if (!selectedProjectId) return;
       setState({ ...state, selectedProjectId, selectedThreadId: null });
+    },
+    createPendingProjectDraft: (input: {
+      readonly projectId: ProjectId;
+      readonly workspaceRoot: string;
+      readonly title: string;
+    }) => {
+      setState({
+        ...state,
+        selectedProjectId: input.projectId,
+        selectedThreadId: null,
+        pendingProjectDraftByProjectId: {
+          ...state.pendingProjectDraftByProjectId,
+          [input.projectId]: {
+            workspaceRoot: input.workspaceRoot,
+            title: input.title,
+          },
+        },
+      });
     },
     promoteProjectDraft: (projectId: ProjectId, threadId: ThreadId) => {
       const threadExists = state.threads.some((thread) => thread.id === threadId);
@@ -207,6 +232,10 @@ export function applyShellItem(
       lastAppliedSequence: item.sequence,
       projects: upsertById(state.projects, item.project),
       updatedAt: item.project.updatedAt,
+      pendingProjectDraftByProjectId: omitRecordKey(
+        state.pendingProjectDraftByProjectId,
+        item.project.id,
+      ),
     };
   }
   if (item.kind === "project-removed") {
@@ -221,6 +250,10 @@ export function applyShellItem(
       draftAttachmentsByProjectId: omitRecordKey(state.draftAttachmentsByProjectId, item.projectId),
       pendingDraftThreadIdByProjectId: omitRecordKey(
         state.pendingDraftThreadIdByProjectId,
+        item.projectId,
+      ),
+      pendingProjectDraftByProjectId: omitRecordKey(
+        state.pendingProjectDraftByProjectId,
         item.projectId,
       ),
     };
@@ -269,6 +302,7 @@ export function fromShellSnapshot(
     | "draftContextByProjectId"
     | "draftAttachmentsByProjectId"
     | "pendingDraftThreadIdByProjectId"
+    | "pendingProjectDraftByProjectId"
     | "selectedProjectId"
     | "selectedThreadId"
   >,
@@ -278,8 +312,12 @@ export function fromShellSnapshot(
   const hasPreviousSelection = previous
     ? previous.selectedProjectId !== null ||
       previous.selectedThreadId !== null ||
-      Object.keys(previous.pendingDraftThreadIdByProjectId).length > 0
+      Object.keys(previous.pendingDraftThreadIdByProjectId).length > 0 ||
+      Object.keys(previous.pendingProjectDraftByProjectId).length > 0
     : false;
+  const pendingProjectDraftByProjectId = previous
+    ? omitKnownProjectDrafts(previous.pendingProjectDraftByProjectId, snapshot.projects)
+    : {};
   const shouldSelectLaunchDraft = Boolean(
     launchProject && (options.preferLaunchProjectDraft || !hasPreviousSelection),
   );
@@ -302,6 +340,7 @@ export function fromShellSnapshot(
     draftContextByProjectId: previous?.draftContextByProjectId ?? {},
     draftAttachmentsByProjectId: previous?.draftAttachmentsByProjectId ?? {},
     pendingDraftThreadIdByProjectId: previous?.pendingDraftThreadIdByProjectId ?? {},
+    pendingProjectDraftByProjectId,
   });
 }
 
@@ -358,6 +397,12 @@ function normalizeSelection(state: TuiShellState): TuiShellState {
   if (selectedProject && state.selectedThreadId === null) {
     return state;
   }
+  const pendingProjectDraft = state.selectedProjectId
+    ? state.pendingProjectDraftByProjectId[state.selectedProjectId]
+    : null;
+  if (pendingProjectDraft && state.selectedThreadId === null) {
+    return state;
+  }
   const projectId = selectedProject?.id ?? state.projects[0]?.id ?? null;
   const fallbackThread = projectId
     ? visibleThreads({ ...state, selectedProjectId: projectId }).find(
@@ -397,4 +442,16 @@ function structuralEqual(left: unknown, right: unknown): boolean {
 function omitRecordKey<T>(record: Readonly<Record<string, T>>, key: string): Record<string, T> {
   const { [key]: _removed, ...rest } = record;
   return rest;
+}
+
+function omitKnownProjectDrafts(
+  record: Readonly<Record<string, TuiPendingProjectDraft>>,
+  projects: readonly OrchestrationProjectShell[],
+): Record<string, TuiPendingProjectDraft> {
+  const projectIds = new Set(projects.map((project) => project.id as string));
+  const next: Record<string, TuiPendingProjectDraft> = {};
+  for (const [projectId, draft] of Object.entries(record)) {
+    if (!projectIds.has(projectId)) next[projectId] = draft;
+  }
+  return next;
 }

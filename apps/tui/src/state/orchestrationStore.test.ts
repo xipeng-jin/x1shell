@@ -424,6 +424,94 @@ describe("TUI shell orchestration store", () => {
       pendingDraftThreadIdByProjectId: {},
     });
   });
+
+  it("keeps a pending project draft selected before its shell arrives", () => {
+    const store = createOrchestrationStore();
+    store.applyShellItem({ kind: "snapshot", snapshot: shellSnapshot(1, ["thread-a"]) });
+
+    store.createPendingProjectDraft({
+      projectId: "project-new" as never,
+      workspaceRoot: "/repo/new",
+      title: "new",
+    });
+
+    expect(store.getSnapshot()).toMatchObject({
+      selectedProjectId: "project-new",
+      selectedThreadId: null,
+      pendingProjectDraftByProjectId: {
+        "project-new": { workspaceRoot: "/repo/new", title: "new" },
+      },
+    });
+
+    store.applyShellItem({
+      kind: "thread-upserted",
+      sequence: 2,
+      thread: threadShell("thread-b", "project-a", "Thread B"),
+    });
+
+    expect(store.getSnapshot()).toMatchObject({
+      selectedProjectId: "project-new",
+      selectedThreadId: null,
+    });
+  });
+
+  it("clears pending project draft metadata when the project shell arrives", () => {
+    const store = createOrchestrationStore();
+    store.applyShellItem({ kind: "snapshot", snapshot: shellSnapshot(1, ["thread-a"]) });
+    store.createPendingProjectDraft({
+      projectId: "project-new" as never,
+      workspaceRoot: "/repo/new",
+      title: "new",
+    });
+
+    store.applyShellItem({
+      kind: "project-upserted",
+      sequence: 2,
+      project: projectShell("project-new", "/repo/new"),
+    });
+
+    expect(store.getSnapshot()).toMatchObject({
+      selectedProjectId: "project-new",
+      selectedThreadId: null,
+      pendingProjectDraftByProjectId: {},
+    });
+  });
+
+  it("clears pending project draft metadata from fresh snapshots and project removal", () => {
+    const store = createOrchestrationStore();
+    store.applyShellItem({ kind: "snapshot", snapshot: shellSnapshot(1, ["thread-a"]) });
+    store.createPendingProjectDraft({
+      projectId: "project-new" as never,
+      workspaceRoot: "/repo/new",
+      title: "new",
+    });
+
+    store.applyShellItem({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 2,
+        updatedAt: "2026-04-28T00:00:01.000Z",
+        projects: [projectShell("project-a"), projectShell("project-new", "/repo/new")],
+        threads: [threadShell("thread-a", "project-a", "Thread A")],
+      },
+    });
+
+    expect(store.getSnapshot().pendingProjectDraftByProjectId).toEqual({});
+
+    store.createPendingProjectDraft({
+      projectId: "project-later" as never,
+      workspaceRoot: "/repo/later",
+      title: "later",
+    });
+    store.applyShellItem({
+      kind: "project-removed",
+      sequence: 3,
+      projectId: "project-later" as never,
+    });
+
+    expect(store.getSnapshot().pendingProjectDraftByProjectId).toEqual({});
+    expect(store.getSnapshot().selectedProjectId).toBe("project-a");
+  });
 });
 
 function shellSnapshot(sequence: number, threadIds: string[]) {

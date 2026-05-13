@@ -24,10 +24,11 @@ import {
   type UploadChatAttachment,
   type VcsStatusResult,
 } from "@t3tools/contracts";
-import { hasTrailingPathSeparator } from "@t3tools/shared/projectPaths";
+import { hasTrailingPathSeparator, inferProjectTitleFromPath } from "@t3tools/shared/projectPaths";
 import type { TuiPaths } from "../cli/config.js";
 import {
   buildExistingThreadTurnStart,
+  buildProjectCreate,
   buildNewThreadTurnStart,
   buildThreadInteractionModeSet,
   buildThreadMetaUpdate,
@@ -40,6 +41,7 @@ import {
   buildThreadUserInputResponse,
   canArchiveThread,
   canStopThreadSession,
+  newProjectId,
 } from "../domain/commands.js";
 import type { TuiDebugEntry } from "../domain/debug.js";
 import {
@@ -112,6 +114,11 @@ import { KeyboardHelp } from "../ui/KeyboardHelp.js";
 import { SettingsPanel } from "../ui/SettingsPanel.js";
 import { X1ShellLogo } from "../ui/landing/X1ShellLogo.js";
 import { resolveX1ShellLandingLayout } from "../ui/landing/responsiveLayout.js";
+import {
+  findTuiProjectByPath,
+  getLatestVisibleThreadForProject,
+  resolveAddProjectSubmitPath,
+} from "./addProjectSubmit.js";
 
 const MAX_DIFF_CACHE_ENTRIES = 12;
 const BROWSE_PALETTE_STATIC_ROW_COUNT = 5;
@@ -155,6 +162,11 @@ export function App(props: {
   onSelectThread?: (threadId: ThreadId) => void;
   onSelectNextThread?: (direction: 1 | -1) => void;
   onCreateProjectDraft?: (projectId: ProjectId) => void;
+  onCreatePendingProjectDraft?: (input: {
+    readonly projectId: ProjectId;
+    readonly workspaceRoot: string;
+    readonly title: string;
+  }) => void;
   onNewThread?: () => void;
   onDraftChange?: (projectId: ProjectId, draft: string) => void;
   onDraftContextChange?: (
@@ -179,10 +191,6 @@ export function App(props: {
   ) => Promise<OrchestrationGetFullThreadDiffResult>;
   onRefreshVcsStatus?: (cwd: string) => Promise<VcsStatusResult>;
   onBrowseFilesystem?: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;
-  onSubmitAddProjectBrowsePath?: (input: {
-    readonly rawPath: string;
-    readonly resolvedPath: string;
-  }) => Promise<unknown> | unknown;
   debugEntries?: readonly TuiDebugEntry[];
   onRequestExit: () => void;
 }): React.ReactNode {
@@ -202,14 +210,21 @@ export function App(props: {
   const activeProject = shell.selectedProjectId
     ? shell.projects.find((project) => project.id === shell.selectedProjectId)
     : shell.projects[0];
+  const pendingProjectDraft =
+    shell.selectedProjectId && !activeProject
+      ? (shell.pendingProjectDraftByProjectId[shell.selectedProjectId] ?? null)
+      : null;
   const activeDetail = shell.selectedThreadId
     ? (props.threadDetailState?.entries[shell.selectedThreadId]?.thread ?? null)
     : null;
   const activeThreadHeader = activeThreadShell ?? activeDetail;
-  const draftProjectId = activeProject?.id ?? activeThreadShell?.projectId ?? null;
-  const draftProjectTitle = activeProject
-    ? workspaceBasename(activeProject.workspaceRoot)
-    : workspaceBasename(props.launchCwd);
+  const draftProjectId =
+    activeProject?.id ?? activeThreadShell?.projectId ?? shell.selectedProjectId ?? null;
+  const draftProjectTitle = pendingProjectDraft
+    ? displayText(pendingProjectDraft.title)
+    : activeProject
+      ? workspaceBasename(activeProject.workspaceRoot)
+      : workspaceBasename(props.launchCwd);
   const draft = draftProjectId ? (shell.draftByProjectId[draftProjectId] ?? "") : "";
   const projectDraftContext = draftProjectId
     ? (shell.draftContextByProjectId[draftProjectId] ?? {})
@@ -960,23 +975,53 @@ export function App(props: {
       filteredEntries: browseFilteredEntries,
       currentProjectWorkspaceRoot: activeProject?.workspaceRoot ?? null,
     });
-    if (resolvedPath.length === 0) return;
-    if (!props.onSubmitAddProjectBrowsePath) {
-      setAddProjectBrowseError(displayText("Add Project submit is not available."));
+    const submitPath = resolveAddProjectSubmitPath({
+      rawPath: resolvedPath,
+      platform: browsePlatformFromEnvironmentOs(status.config?.environment.platform.os ?? null),
+      currentProjectWorkspaceRoot: activeProject?.workspaceRoot ?? null,
+    });
+    if (submitPath.kind === "empty") return;
+    if (submitPath.kind === "error") {
+      setAddProjectBrowseError(displayText(submitPath.message));
       return;
     }
 
+    const cwd = submitPath.cwd;
+    const existingProject = findTuiProjectByPath(shell.projects, cwd);
+    if (existingProject) {
+      const latestThread = getLatestVisibleThreadForProject(shell.threads, existingProject.id);
+      if (latestThread) {
+        props.onSelectThread?.(latestThread.id);
+      } else {
+        props.onCreateProjectDraft?.(existingProject.id);
+      }
+      closePalette();
+      return;
+    }
+
+    if (!props.onSubmitCommand) {
+      setAddProjectBrowseError(displayText("Add Project submit is not available."));
+      return;
+    }
+    if (!props.onCreatePendingProjectDraft) {
+      setAddProjectBrowseError(displayText("Add Project draft creation is not available."));
+      return;
+    }
+
+    const projectId = newProjectId();
+    const title = inferProjectTitleFromPath(cwd);
     try {
-      const result = props.onSubmitAddProjectBrowsePath({
-        rawPath: addProjectBrowseQuery.trim(),
-        resolvedPath,
-      });
+      const result = props.onSubmitCommand(buildProjectCreate({ projectId, cwd }));
       if (result && typeof (result as Promise<unknown>).then === "function") {
         void (result as Promise<unknown>).then(
-          () => closePalette(),
+          () => {
+            props.onCreatePendingProjectDraft?.({ projectId, workspaceRoot: cwd, title });
+            closePalette();
+          },
           (error: unknown) => setAddProjectBrowseError(displayText(String(error))),
         );
       } else {
+        props.onCreatePendingProjectDraft({ projectId, workspaceRoot: cwd, title });
         closePalette();
       }
     } catch (error) {
@@ -1035,6 +1080,9 @@ export function App(props: {
         });
         await props.onSubmitCommand(command);
         props.onPromoteProjectDraft?.(activeProject.id, command.threadId);
+      } else if (pendingProjectDraft) {
+        setSubmitError(displayText("Project is still loading."));
+        return;
       } else {
         return;
       }
@@ -2787,4 +2835,5 @@ const DEFAULT_SHELL: TuiShellState = {
   draftContextByProjectId: {},
   draftAttachmentsByProjectId: {},
   pendingDraftThreadIdByProjectId: {},
+  pendingProjectDraftByProjectId: {},
 };

@@ -330,6 +330,10 @@ async function runInteractive(
           orchestrationStore.createProjectDraft(projectId);
           controller?.setActiveThread(null);
         }}
+        onCreatePendingProjectDraft={(input) => {
+          orchestrationStore.createPendingProjectDraft(input);
+          controller?.setActiveThread(null);
+        }}
         onSelectNextThread={(direction) => {
           orchestrationStore.selectNextThread(direction);
           controller?.setActiveThread(orchestrationStore.getSnapshot().selectedThreadId);

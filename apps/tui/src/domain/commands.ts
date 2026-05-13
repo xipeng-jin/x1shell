@@ -1,9 +1,12 @@
 import {
   CommandId,
+  DEFAULT_MODEL,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   type ApprovalRequestId,
   MessageId,
+  ProjectId,
+  ProviderInstanceId,
   ThreadId,
   type ClientOrchestrationCommand,
   type ModelSelection,
@@ -11,17 +14,21 @@ import {
   type OrchestrationThread,
   type OrchestrationThreadShell,
   type ProviderInteractionMode,
-  type ProjectId,
   type ProviderApprovalDecision,
   type RuntimeMode,
   type UploadChatAttachment,
   type TurnId,
 } from "@t3tools/contracts";
+import { inferProjectTitleFromPath } from "@t3tools/shared/projectPaths";
 import { createDefaultTuiModelSelection } from "./providerInstances.js";
 
 type ClientThreadTurnStartCommand = Extract<
   ClientOrchestrationCommand,
   { readonly type: "thread.turn.start" }
+>;
+type ClientProjectCreateCommand = Extract<
+  ClientOrchestrationCommand,
+  { readonly type: "project.create" }
 >;
 type ThreadLike = OrchestrationThreadShell | OrchestrationThread;
 
@@ -94,6 +101,26 @@ export function buildThreadUserInputResponse(input: {
     threadId: input.threadId,
     requestId: input.requestId,
     answers: input.answers,
+    createdAt: input.now ?? new Date().toISOString(),
+  };
+}
+
+export function buildProjectCreate(input: {
+  readonly projectId: ProjectId;
+  readonly cwd: string;
+  readonly now?: string;
+}): ClientProjectCreateCommand {
+  return {
+    type: "project.create",
+    commandId: newCommandId(),
+    projectId: input.projectId,
+    title: inferProjectTitleFromPath(input.cwd),
+    workspaceRoot: input.cwd,
+    createWorkspaceRootIfMissing: true,
+    defaultModelSelection: {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: DEFAULT_MODEL,
+    },
     createdAt: input.now ?? new Date().toISOString(),
   };
 }
@@ -235,5 +262,6 @@ function randomUUID(): string {
 
 export const newCommandId = (): CommandId => CommandId.make(randomUUID());
 export const newMessageId = (): MessageId => MessageId.make(randomUUID());
+export const newProjectId = (): ProjectId => ProjectId.make(randomUUID());
 export const newThreadId = (): ThreadId => ThreadId.make(randomUUID());
 export const asProjectId = (value: string): ProjectId => value as ProjectId;

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_MODEL, ProviderInstanceId } from "@t3tools/contracts";
 import {
+  buildProjectCreate,
   buildExistingThreadTurnStart,
   buildNewThreadTurnStart,
   buildThreadInteractionModeSet,
@@ -13,6 +15,7 @@ import {
   buildThreadUserInputResponse,
   canArchiveThread,
   canStopThreadSession,
+  newProjectId,
 } from "./commands.js";
 
 describe("TUI orchestration command builders", () => {
@@ -106,6 +109,34 @@ describe("TUI orchestration command builders", () => {
       runtimeMode: "approval-required",
       interactionMode: "plan",
       message: { attachments: [{ mimeType: "image/png", sizeBytes: 3 }] },
+    });
+  });
+
+  it("builds web-equivalent project create commands", () => {
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000041")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000042");
+
+    const projectId = newProjectId();
+    const command = buildProjectCreate({
+      projectId,
+      cwd: "/repo/x1shell",
+      now: "2026-04-28T12:00:00.000Z",
+    });
+
+    expect(projectId).toBe("00000000-0000-4000-8000-000000000041");
+    expect(command).toEqual({
+      type: "project.create",
+      commandId: "00000000-0000-4000-8000-000000000042",
+      projectId,
+      title: "x1shell",
+      workspaceRoot: "/repo/x1shell",
+      createWorkspaceRootIfMissing: true,
+      defaultModelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: DEFAULT_MODEL,
+      },
+      createdAt: "2026-04-28T12:00:00.000Z",
     });
   });
 
