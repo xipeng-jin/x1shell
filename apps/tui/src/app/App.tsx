@@ -73,15 +73,20 @@ import {
   isPlainTextSequence,
   parseComposerAttachmentInput,
 } from "./input.js";
+import { nextAddProjectPaletteIntent, type PaletteIntent } from "./paletteIntent.js";
 import {
-  nextAddProjectPaletteIntent,
-  type PaletteIntent,
-  type PaletteMode,
-} from "./paletteIntent.js";
+  buildActionPaletteView,
+  buildAddProjectBrowsePaletteView,
+  buildAddProjectSourcesPaletteView,
+  initialAddProjectBrowseQuery,
+  type TuiPaletteItem,
+  type TuiPaletteMode,
+} from "./paletteViewModel.js";
 import type { TuiServerStatusSnapshot } from "../state/serverConfigStore.js";
 import type { TuiShellState } from "../state/orchestrationStore.js";
 import type { ThreadDetailState } from "../state/threadDetailStore.js";
 import { SafeMarkdown } from "../terminal/safeMarkdown.js";
+import { sanitizeText } from "../terminal/safeTextStream.js";
 import type { TuiTheme } from "../terminal/theme.js";
 import { CommandPalette } from "../ui/CommandPalette.js";
 import { DebugPanel } from "../ui/DebugPanel.js";
@@ -110,6 +115,7 @@ const SIDEBAR_THREAD_TITLE_WIDTH =
 const COMPOSER_TEXTAREA_MIN_HEIGHT = 3;
 const COMPOSER_TEXTAREA_MAX_HEIGHT = 8;
 const COMPOSER_PENDING_TEXTAREA_MIN_HEIGHT = 2;
+const MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH = 512;
 
 type LandingFocusArea = "projects" | "threads" | "timeline" | "composer" | "controls";
 type DraftControlContext = {
@@ -192,9 +198,10 @@ export function App(props: {
   const [visiblePanel, setVisiblePanel] = useState<
     null | "palette" | "help" | "diff" | "debug" | "settings"
   >(null);
-  const [paletteMode, setPaletteMode] = useState<PaletteMode>("actions");
+  const [paletteMode, setPaletteMode] = useState<TuiPaletteMode>("actions");
   const [paletteIntent, setPaletteIntent] = useState<PaletteIntent | null>(null);
   const [paletteQuery, setPaletteQuery] = useState("");
+  const [addProjectBrowseQuery, setAddProjectBrowseQuery] = useState("");
   const [paletteSelectedIndex, setPaletteSelectedIndex] = useState(0);
   const [diffState, setDiffState] = useState<{
     readonly loading: boolean;
@@ -258,6 +265,13 @@ export function App(props: {
   const selectedProvider = findProvider(status.config?.providers ?? [], selectedModelSelection);
   const banners = deriveErrorBanners({ status, provider: selectedProvider });
   const paletteActions = useMemo(() => filterPaletteActions(paletteQuery), [paletteQuery]);
+  const paletteView = useMemo(() => {
+    if (paletteMode === "add-project-sources") return buildAddProjectSourcesPaletteView();
+    if (paletteMode === "add-project-browse") {
+      return buildAddProjectBrowsePaletteView({ query: addProjectBrowseQuery });
+    }
+    return buildActionPaletteView({ actions: paletteActions, query: paletteQuery });
+  }, [addProjectBrowseQuery, paletteActions, paletteMode, paletteQuery]);
   activeDiffThreadIdRef.current = activeDetail?.id ?? null;
 
   useEffect(() => {
@@ -287,8 +301,9 @@ export function App(props: {
   useEffect(() => {
     if (paletteIntent?.kind !== "add-project") return;
     setPaletteIntent(null);
-    setPaletteMode("add-project");
+    setPaletteMode("add-project-sources");
     setPaletteQuery("");
+    setAddProjectBrowseQuery("");
     setPaletteSelectedIndex(0);
   }, [paletteIntent]);
 
@@ -314,17 +329,46 @@ export function App(props: {
         closePalette();
         return;
       }
-      if (paletteMode === "add-project") {
+      if (paletteMode === "add-project-sources") {
         if (key.name === "up" || key.name === "down") {
           setPaletteSelectedIndex(0);
           return;
         }
         if (key.name === "return" || key.name === "enter") {
-          handleAddProjectLocalFolder();
+          handlePaletteItem(paletteView.items[paletteSelectedIndex]);
           return;
         }
         if (key.ctrl && key.name === "p") {
           openCommandPaletteActions();
+          return;
+        }
+        if (key.name === "tab" || key.name === "backspace") {
+          return;
+        }
+        return;
+      }
+      if (paletteMode === "add-project-browse") {
+        if (key.ctrl && key.name === "p") {
+          openCommandPaletteActions();
+          return;
+        }
+        if (key.name === "tab") {
+          return;
+        }
+        if (key.name === "backspace") {
+          if (addProjectBrowseQuery.length === 0) {
+            setPaletteMode("add-project-sources");
+            setPaletteSelectedIndex(0);
+          } else {
+            setAddProjectBrowseQuery((query) => query.slice(0, -1));
+          }
+          return;
+        }
+        if (key.name === "return" || key.name === "enter") {
+          return;
+        }
+        if (isPlainTextSequence(key)) {
+          setAddProjectBrowseQuery((query) => appendAddProjectBrowseQuery(query, key.sequence));
           return;
         }
         return;
@@ -621,6 +665,7 @@ export function App(props: {
     setPaletteIntent(null);
     setPaletteMode("actions");
     setPaletteQuery("");
+    setAddProjectBrowseQuery("");
     setPaletteSelectedIndex(0);
   }
 
@@ -628,6 +673,7 @@ export function App(props: {
     setPaletteIntent(null);
     setPaletteMode("actions");
     setPaletteQuery("");
+    setAddProjectBrowseQuery("");
     setPaletteSelectedIndex(0);
     setVisiblePanel("palette");
   }
@@ -639,8 +685,23 @@ export function App(props: {
     setPaletteIntent((intent) => nextAddProjectPaletteIntent(intent));
   }
 
-  function handleAddProjectLocalFolder(): void {
-    setSubmitError(displayText("Local folder browsing is not implemented in this phase."));
+  function handlePaletteItem(item: TuiPaletteItem | undefined): void {
+    if (!item) return;
+    if (item.kind === "add-project-source" && item.source === "local") {
+      setPaletteMode("add-project-browse");
+      setAddProjectBrowseQuery(
+        initialAddProjectBrowseQuery({
+          addProjectBaseDirectory: status.config?.settings.addProjectBaseDirectory ?? null,
+        }),
+      );
+      setPaletteSelectedIndex(0);
+      return;
+    }
+    if (item.kind === "action") {
+      setVisiblePanel(null);
+      setPaletteQuery("");
+      runAsyncAction(() => performAction(item.id));
+    }
   }
 
   function selectAdjacentProject(direction: 1 | -1) {
@@ -1035,10 +1096,8 @@ export function App(props: {
         >
           {visiblePanel === "palette" ? (
             <CommandPalette
-              actions={paletteActions}
-              mode={paletteMode}
-              onAddProjectLocalFolder={handleAddProjectLocalFolder}
-              query={paletteQuery}
+              view={paletteView}
+              onSelectItem={handlePaletteItem}
               selectedIndex={paletteSelectedIndex}
               theme={props.theme}
             />
@@ -2113,6 +2172,12 @@ function workspaceBasename(workspaceRoot: string): string {
   } catch {
     return "workspace";
   }
+}
+
+function appendAddProjectBrowseQuery(existing: string, sequence: string): string {
+  return sanitizeText(`${existing}${sequence}`)
+    .replace(/[\r\n]+/g, "")
+    .slice(0, MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH);
 }
 
 function headerTitleMaxLength(input: {

@@ -2,13 +2,17 @@ import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 import { TUI_ACTIONS } from "../domain/keybindings.js";
 import { resolveTheme } from "../terminal/theme.js";
+import {
+  buildActionPaletteView,
+  buildAddProjectBrowsePaletteView,
+  buildAddProjectSourcesPaletteView,
+} from "../app/paletteViewModel.js";
 import { CommandPalette } from "./CommandPalette.js";
 
 describe("CommandPalette", () => {
   it("renders normal command palette actions by default", () => {
     const palette = CommandPalette({
-      actions: TUI_ACTIONS,
-      query: "",
+      view: buildActionPaletteView({ actions: TUI_ACTIONS, query: "" }),
       selectedIndex: 0,
       theme: resolveTheme("dark"),
     });
@@ -21,9 +25,7 @@ describe("CommandPalette", () => {
 
   it("renders Add Project source selection without normal actions", () => {
     const palette = CommandPalette({
-      actions: TUI_ACTIONS,
-      mode: "add-project",
-      query: "",
+      view: buildAddProjectSourcesPaletteView(),
       selectedIndex: 0,
       theme: resolveTheme("dark"),
     });
@@ -34,6 +36,35 @@ describe("CommandPalette", () => {
     expect(text).toContain("Local folder");
     expect(text).toContain("Browse a folder on disk");
     expect(text).not.toContain("New thread");
+    expect(text).not.toContain("Git URL");
+    expect(text).not.toContain("GitHub");
+    expect(text).not.toContain("GitLab");
+  });
+
+  it("renders Add Project browse mode with query and directory items", () => {
+    const palette = CommandPalette({
+      view: buildAddProjectBrowsePaletteView({
+        query: "~/Code/",
+        items: [
+          { kind: "browse-up" },
+          ...Array.from({ length: 12 }, (_, index) => ({
+            kind: "browse-directory" as const,
+            name: `repo-${index}`,
+            fullPath: `/home/me/Code/repo-${index}`,
+          })),
+        ],
+      }),
+      selectedIndex: 0,
+      theme: resolveTheme("dark"),
+    });
+    const text = flattenText(palette);
+
+    expect(text).toContain("Add project / Local folder");
+    expect(text).toContain("~/Code/");
+    expect(text).toContain("..");
+    expect(text).toContain("repo-0");
+    expect(text).toContain("repo-11");
+    expect(text).not.toContain("Filesystem browsing starts in a later phase.");
   });
 });
 
