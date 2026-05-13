@@ -73,6 +73,11 @@ import {
   isPlainTextSequence,
   parseComposerAttachmentInput,
 } from "./input.js";
+import {
+  nextAddProjectPaletteIntent,
+  type PaletteIntent,
+  type PaletteMode,
+} from "./paletteIntent.js";
 import type { TuiServerStatusSnapshot } from "../state/serverConfigStore.js";
 import type { TuiShellState } from "../state/orchestrationStore.js";
 import type { ThreadDetailState } from "../state/threadDetailStore.js";
@@ -107,7 +112,6 @@ const COMPOSER_TEXTAREA_MAX_HEIGHT = 8;
 const COMPOSER_PENDING_TEXTAREA_MIN_HEIGHT = 2;
 
 type LandingFocusArea = "projects" | "threads" | "timeline" | "composer" | "controls";
-
 type DraftControlContext = {
   readonly modelSelection?: ModelSelection;
   readonly runtimeMode?: RuntimeMode;
@@ -188,6 +192,8 @@ export function App(props: {
   const [visiblePanel, setVisiblePanel] = useState<
     null | "palette" | "help" | "diff" | "debug" | "settings"
   >(null);
+  const [paletteMode, setPaletteMode] = useState<PaletteMode>("actions");
+  const [paletteIntent, setPaletteIntent] = useState<PaletteIntent | null>(null);
   const [paletteQuery, setPaletteQuery] = useState("");
   const [paletteSelectedIndex, setPaletteSelectedIndex] = useState(0);
   const [diffState, setDiffState] = useState<{
@@ -278,6 +284,14 @@ export function App(props: {
     setPaletteSelectedIndex(0);
   }, [paletteQuery]);
 
+  useEffect(() => {
+    if (paletteIntent?.kind !== "add-project") return;
+    setPaletteIntent(null);
+    setPaletteMode("add-project");
+    setPaletteQuery("");
+    setPaletteSelectedIndex(0);
+  }, [paletteIntent]);
+
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") {
       if (activeThreadHeader?.session?.status === "running" && activeThreadHeader.id) {
@@ -297,8 +311,22 @@ export function App(props: {
     }
     if (visiblePanel === "palette") {
       if (key.name === "escape") {
-        setVisiblePanel(null);
-        setPaletteQuery("");
+        closePalette();
+        return;
+      }
+      if (paletteMode === "add-project") {
+        if (key.name === "up" || key.name === "down") {
+          setPaletteSelectedIndex(0);
+          return;
+        }
+        if (key.name === "return" || key.name === "enter") {
+          handleAddProjectLocalFolder();
+          return;
+        }
+        if (key.ctrl && key.name === "p") {
+          openCommandPaletteActions();
+          return;
+        }
         return;
       }
       if (key.name === "up") {
@@ -403,9 +431,7 @@ export function App(props: {
       return;
     }
     if (key.ctrl && key.name === "p") {
-      setVisiblePanel(null);
-      setFocusArea("composer");
-      props.onNewThread?.();
+      openCommandPaletteActions();
       return;
     }
     if (key.ctrl && key.name === "b") {
@@ -590,6 +616,33 @@ export function App(props: {
     }
   }
 
+  function closePalette(): void {
+    setVisiblePanel(null);
+    setPaletteIntent(null);
+    setPaletteMode("actions");
+    setPaletteQuery("");
+    setPaletteSelectedIndex(0);
+  }
+
+  function openCommandPaletteActions(): void {
+    setPaletteIntent(null);
+    setPaletteMode("actions");
+    setPaletteQuery("");
+    setPaletteSelectedIndex(0);
+    setVisiblePanel("palette");
+  }
+
+  function openAddProjectPalette(): void {
+    setFocusArea("timeline");
+    setSidebarOverlayOpen(false);
+    setVisiblePanel("palette");
+    setPaletteIntent((intent) => nextAddProjectPaletteIntent(intent));
+  }
+
+  function handleAddProjectLocalFolder(): void {
+    setSubmitError(displayText("Local folder browsing is not implemented in this phase."));
+  }
+
   function selectAdjacentProject(direction: 1 | -1) {
     const projects = sortedProjects(shell.projects);
     if (projects.length === 0) return;
@@ -655,8 +708,7 @@ export function App(props: {
   async function performAction(actionId: TuiActionId) {
     switch (actionId) {
       case "palette.open":
-        setVisiblePanel("palette");
-        setPaletteQuery("");
+        openCommandPaletteActions();
         return;
       case "help.toggle":
         setVisiblePanel(visiblePanel === "help" ? null : "help");
@@ -930,11 +982,7 @@ export function App(props: {
             props.onCreateProjectDraft?.(projectId);
             setSidebarOverlayOpen(false);
           }}
-          onCreateFirstProjectDraft={() => {
-            setFocusArea("composer");
-            props.onNewThread?.();
-            setSidebarOverlayOpen(false);
-          }}
+          onOpenAddProject={openAddProjectPalette}
           onSelectThread={(threadId) => {
             setFocusArea("threads");
             props.onSelectThread?.(threadId);
@@ -988,6 +1036,8 @@ export function App(props: {
           {visiblePanel === "palette" ? (
             <CommandPalette
               actions={paletteActions}
+              mode={paletteMode}
+              onAddProjectLocalFolder={handleAddProjectLocalFolder}
               query={paletteQuery}
               selectedIndex={paletteSelectedIndex}
               theme={props.theme}
@@ -1145,7 +1195,7 @@ function Sidebar(props: {
   expandedProjectIds: ReadonlySet<string>;
   onToggleProject: (projectId: ProjectId) => void;
   onCreateProjectDraft: (projectId: ProjectId) => void;
-  onCreateFirstProjectDraft: () => void;
+  onOpenAddProject: () => void;
   onSelectThread: (threadId: ThreadId) => void;
   onOpenSettings: () => void;
   onOpenKeybindings: () => void;
@@ -1173,7 +1223,7 @@ function Sidebar(props: {
           label="PROJECTS"
           actions={[
             { icon: "⇅", active: false, disabled: true },
-            { icon: "+", active: false, onPress: props.onCreateFirstProjectDraft },
+            { icon: "+", active: false, onPress: props.onOpenAddProject },
           ]}
           theme={props.theme}
         />
