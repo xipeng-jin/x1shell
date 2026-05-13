@@ -61,10 +61,13 @@ export function buildTuiFilesystemBrowseRequest(input: {
     };
   }
 
+  const browseDirectoryPath = getBrowseDirectoryPath(query);
+  if (browseDirectoryPath.length === 0) return { kind: "skip" };
+
   return {
     kind: "browse",
     request: {
-      partialPath: query,
+      partialPath: browseDirectoryPath,
       ...(input.activeProjectWorkspaceRoot ? { cwd: input.activeProjectWorkspaceRoot } : {}),
     },
   };
@@ -144,14 +147,13 @@ export function isPrimaryEnterModifier(input: {
 export function filterBrowseEntries(input: {
   readonly browseEntries: readonly FilesystemBrowseEntry[];
   readonly browseFilterQuery: string;
-  readonly isDirectoryMode: boolean;
   readonly highlightedItemValue: string | null;
 }): {
   readonly filteredEntries: FilesystemBrowseEntry[];
   readonly highlightedEntry: FilesystemBrowseEntry | null;
 } {
   const lowerFilter = input.browseFilterQuery.toLowerCase();
-  const showHidden = input.isDirectoryMode || input.browseFilterQuery.startsWith(".");
+  const showHidden = input.browseFilterQuery.startsWith(".");
 
   const filteredEntries = input.browseEntries.filter(
     (entry) =>

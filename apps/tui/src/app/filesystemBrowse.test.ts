@@ -31,7 +31,7 @@ describe("TUI filesystem browse helpers", () => {
       }),
     ).toEqual({
       kind: "browse",
-      request: { partialPath: "~/Code/x1shell" },
+      request: { partialPath: "~/Code/" },
     });
 
     expect(
@@ -82,7 +82,7 @@ describe("TUI filesystem browse helpers", () => {
       }),
     ).toEqual({
       kind: "browse",
-      request: { partialPath: "C:\\Work\\Repo" },
+      request: { partialPath: "C:\\Work\\" },
     });
   });
 
@@ -110,7 +110,6 @@ describe("TUI filesystem browse helpers", () => {
       filterBrowseEntries({
         browseEntries: entries,
         browseFilterQuery: "src",
-        isDirectoryMode: false,
         highlightedItemValue: null,
       }).filteredEntries.map((entry) => entry.name),
     ).toEqual(["src", "src-ui"]);
@@ -119,13 +118,12 @@ describe("TUI filesystem browse helpers", () => {
       filterBrowseEntries({
         browseEntries: entries,
         browseFilterQuery: ".s",
-        isDirectoryMode: false,
         highlightedItemValue: null,
       }).filteredEntries.map((entry) => entry.name),
     ).toEqual([".src-cache"]);
   });
 
-  it("preserves server-returned dot directories in directory browse mode", () => {
+  it("hides dot directories unless the browse filter starts with a dot", () => {
     const entries = [
       { name: ".config", fullPath: "/repo/.config" },
       { name: "config", fullPath: "/repo/config" },
@@ -135,10 +133,17 @@ describe("TUI filesystem browse helpers", () => {
       filterBrowseEntries({
         browseEntries: entries,
         browseFilterQuery: "",
-        isDirectoryMode: true,
         highlightedItemValue: null,
       }).filteredEntries.map((entry) => entry.name),
-    ).toEqual([".config", "config"]);
+    ).toEqual(["config"]);
+
+    expect(
+      filterBrowseEntries({
+        browseEntries: entries,
+        browseFilterQuery: ".c",
+        highlightedItemValue: null,
+      }).filteredEntries.map((entry) => entry.name),
+    ).toEqual([".config"]);
   });
 
   it("does not impose a fixed filtering result limit", () => {
@@ -151,7 +156,6 @@ describe("TUI filesystem browse helpers", () => {
       filterBrowseEntries({
         browseEntries: entries,
         browseFilterQuery: "src",
-        isDirectoryMode: false,
         highlightedItemValue: null,
       }).filteredEntries,
     ).toHaveLength(12);
@@ -167,7 +171,6 @@ describe("TUI filesystem browse helpers", () => {
       filterBrowseEntries({
         browseEntries: entries,
         browseFilterQuery: "s",
-        isDirectoryMode: false,
         highlightedItemValue: "browse:/repo/scripts",
       }).highlightedEntry,
     ).toEqual({ name: "scripts", fullPath: "/repo/scripts" });
@@ -176,7 +179,6 @@ describe("TUI filesystem browse helpers", () => {
       filterBrowseEntries({
         browseEntries: entries,
         browseFilterQuery: "src",
-        isDirectoryMode: false,
         highlightedItemValue: "browse:/repo/scripts",
       }).highlightedEntry,
     ).toBeNull();

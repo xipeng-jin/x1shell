@@ -24,7 +24,7 @@ import {
   type UploadChatAttachment,
   type VcsStatusResult,
 } from "@t3tools/contracts";
-import { hasTrailingPathSeparator, inferProjectTitleFromPath } from "@t3tools/shared/projectPaths";
+import { inferProjectTitleFromPath } from "@t3tools/shared/projectPaths";
 import type { TuiPaths } from "../cli/config.js";
 import {
   buildExistingThreadTurnStart,
@@ -323,15 +323,9 @@ export function App(props: {
       filterBrowseEntries({
         browseEntries: addProjectBrowseEntries,
         browseFilterQuery,
-        isDirectoryMode: hasTrailingPathSeparator(addProjectBrowseQuery),
         highlightedItemValue: addProjectBrowseHighlightedItemValue,
       }).filteredEntries,
-    [
-      addProjectBrowseEntries,
-      addProjectBrowseHighlightedItemValue,
-      addProjectBrowseQuery,
-      browseFilterQuery,
-    ],
+    [addProjectBrowseEntries, addProjectBrowseHighlightedItemValue, browseFilterQuery],
   );
   const browsePaletteItems = useMemo(
     () => browseItemsForQuery({ query: addProjectBrowseQuery, entries: browseFilteredEntries }),
