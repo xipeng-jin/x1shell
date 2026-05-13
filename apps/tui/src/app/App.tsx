@@ -24,6 +24,7 @@ import {
   type UploadChatAttachment,
   type VcsStatusResult,
 } from "@t3tools/contracts";
+import { hasTrailingPathSeparator } from "@t3tools/shared/projectPaths";
 import type { TuiPaths } from "../cli/config.js";
 import {
   buildExistingThreadTurnStart,
@@ -86,8 +87,13 @@ import {
 } from "./paletteViewModel.js";
 import {
   browseEntriesToPaletteItems,
+  browseFilterQueryFromPath,
+  browseItemValue,
+  browseWindowStartForHighlight,
   browsePlatformFromEnvironmentOs,
   buildTuiFilesystemBrowseRequest,
+  filterBrowseEntries,
+  moveBrowseHighlight,
 } from "./filesystemBrowse.js";
 import type { TuiServerStatusSnapshot } from "../state/serverConfigStore.js";
 import type { TuiShellState } from "../state/orchestrationStore.js";
@@ -104,6 +110,7 @@ import { X1ShellLogo } from "../ui/landing/X1ShellLogo.js";
 import { resolveX1ShellLandingLayout } from "../ui/landing/responsiveLayout.js";
 
 const MAX_DIFF_CACHE_ENTRIES = 12;
+const BROWSE_PALETTE_STATIC_ROW_COUNT = 5;
 const HEADER_THREAD_TITLE_MAX_LENGTH = 44;
 const SIDEBAR_THREAD_TIMESTAMP_WIDTH = 4;
 const SIDEBAR_TREE_INDENT_WIDTH = 1;
@@ -215,6 +222,10 @@ export function App(props: {
   >([]);
   const [addProjectBrowseLoading, setAddProjectBrowseLoading] = useState(false);
   const [addProjectBrowseError, setAddProjectBrowseError] = useState<string | null>(null);
+  const [addProjectBrowseHighlightedItemValue, setAddProjectBrowseHighlightedItemValue] = useState<
+    string | null
+  >(null);
+  const [addProjectBrowseWindowStart, setAddProjectBrowseWindowStart] = useState(0);
   const [paletteSelectedIndex, setPaletteSelectedIndex] = useState(0);
   const [diffState, setDiffState] = useState<{
     readonly loading: boolean;
@@ -280,25 +291,75 @@ export function App(props: {
   const selectedProvider = findProvider(status.config?.providers ?? [], selectedModelSelection);
   const banners = deriveErrorBanners({ status, provider: selectedProvider });
   const paletteActions = useMemo(() => filterPaletteActions(paletteQuery), [paletteQuery]);
+  const browseFilterQuery = useMemo(
+    () => browseFilterQueryFromPath(addProjectBrowseQuery),
+    [addProjectBrowseQuery],
+  );
+  const browseFilteredEntries = useMemo(
+    () =>
+      filterBrowseEntries({
+        browseEntries: addProjectBrowseEntries,
+        browseFilterQuery,
+        isDirectoryMode: hasTrailingPathSeparator(addProjectBrowseQuery),
+        highlightedItemValue: addProjectBrowseHighlightedItemValue,
+      }).filteredEntries,
+    [
+      addProjectBrowseEntries,
+      addProjectBrowseHighlightedItemValue,
+      addProjectBrowseQuery,
+      browseFilterQuery,
+    ],
+  );
+  const browsePaletteItems = useMemo(
+    () => browseEntriesToPaletteItems(browseFilteredEntries),
+    [browseFilteredEntries],
+  );
+  const browseWindowSize = Math.max(
+    1,
+    dimensions.height - BROWSE_PALETTE_STATIC_ROW_COUNT - (addProjectBrowseError ? 1 : 0),
+  );
+  const visibleBrowseWindowStart = useMemo(
+    () =>
+      browseWindowStartForHighlight({
+        items: browsePaletteItems,
+        highlightedItemValue: addProjectBrowseHighlightedItemValue,
+        currentStart: addProjectBrowseWindowStart,
+        windowSize: browseWindowSize,
+      }),
+    [
+      addProjectBrowseHighlightedItemValue,
+      addProjectBrowseWindowStart,
+      browsePaletteItems,
+      browseWindowSize,
+    ],
+  );
+  const visibleBrowsePaletteItems = useMemo(
+    () =>
+      browsePaletteItems.slice(
+        visibleBrowseWindowStart,
+        visibleBrowseWindowStart + browseWindowSize,
+      ),
+    [browsePaletteItems, browseWindowSize, visibleBrowseWindowStart],
+  );
   const paletteView = useMemo(() => {
     if (paletteMode === "add-project-sources") return buildAddProjectSourcesPaletteView();
     if (paletteMode === "add-project-browse") {
       return buildAddProjectBrowsePaletteView({
         query: addProjectBrowseQuery,
-        items: browseEntriesToPaletteItems(addProjectBrowseEntries),
+        items: visibleBrowsePaletteItems,
         loading: addProjectBrowseLoading,
         error: addProjectBrowseError,
       });
     }
     return buildActionPaletteView({ actions: paletteActions, query: paletteQuery });
   }, [
-    addProjectBrowseEntries,
     addProjectBrowseError,
     addProjectBrowseLoading,
     addProjectBrowseQuery,
     paletteActions,
     paletteMode,
     paletteQuery,
+    visibleBrowsePaletteItems,
   ]);
   activeDiffThreadIdRef.current = activeDetail?.id ?? null;
 
@@ -327,6 +388,11 @@ export function App(props: {
   }, [paletteQuery]);
 
   useEffect(() => {
+    setAddProjectBrowseHighlightedItemValue(null);
+    setAddProjectBrowseWindowStart(0);
+  }, [addProjectBrowseQuery]);
+
+  useEffect(() => {
     if (paletteIntent?.kind !== "add-project") return;
     setPaletteIntent(null);
     setPaletteMode("add-project-sources");
@@ -335,6 +401,8 @@ export function App(props: {
     setAddProjectBrowseEntries([]);
     setAddProjectBrowseLoading(false);
     setAddProjectBrowseError(null);
+    setAddProjectBrowseHighlightedItemValue(null);
+    setAddProjectBrowseWindowStart(0);
     setPaletteSelectedIndex(0);
   }, [paletteIntent]);
 
@@ -453,10 +521,30 @@ export function App(props: {
         if (key.name === "tab") {
           return;
         }
+        if (key.name === "up" || key.name === "down") {
+          const direction = key.name === "down" ? 1 : -1;
+          const nextValue = moveBrowseHighlight({
+            items: browsePaletteItems,
+            highlightedItemValue: addProjectBrowseHighlightedItemValue,
+            direction,
+          });
+          setAddProjectBrowseHighlightedItemValue(nextValue);
+          setAddProjectBrowseWindowStart((currentStart) =>
+            browseWindowStartForHighlight({
+              items: browsePaletteItems,
+              highlightedItemValue: nextValue,
+              currentStart,
+              windowSize: browseWindowSize,
+            }),
+          );
+          return;
+        }
         if (key.name === "backspace") {
           if (addProjectBrowseQuery.length === 0) {
             setPaletteMode("add-project-sources");
             setPaletteSelectedIndex(0);
+            setAddProjectBrowseHighlightedItemValue(null);
+            setAddProjectBrowseWindowStart(0);
           } else {
             setAddProjectBrowseQuery((query) => query.slice(0, -1));
           }
@@ -767,6 +855,8 @@ export function App(props: {
     setAddProjectBrowseEntries([]);
     setAddProjectBrowseLoading(false);
     setAddProjectBrowseError(null);
+    setAddProjectBrowseHighlightedItemValue(null);
+    setAddProjectBrowseWindowStart(0);
     setPaletteSelectedIndex(0);
   }
 
@@ -778,6 +868,8 @@ export function App(props: {
     setAddProjectBrowseEntries([]);
     setAddProjectBrowseLoading(false);
     setAddProjectBrowseError(null);
+    setAddProjectBrowseHighlightedItemValue(null);
+    setAddProjectBrowseWindowStart(0);
     setPaletteSelectedIndex(0);
     setVisiblePanel("palette");
   }
@@ -801,6 +893,8 @@ export function App(props: {
       setAddProjectBrowseEntries([]);
       setAddProjectBrowseLoading(false);
       setAddProjectBrowseError(null);
+      setAddProjectBrowseHighlightedItemValue(null);
+      setAddProjectBrowseWindowStart(0);
       setPaletteSelectedIndex(0);
       return;
     }
@@ -809,6 +903,11 @@ export function App(props: {
       setPaletteQuery("");
       runAsyncAction(() => performAction(item.id));
     }
+  }
+
+  function handlePaletteHighlight(item: TuiPaletteItem | undefined): void {
+    if (!item || (item.kind !== "browse-directory" && item.kind !== "browse-up")) return;
+    setAddProjectBrowseHighlightedItemValue(browseItemValue(item));
   }
 
   function selectAdjacentProject(direction: 1 | -1) {
@@ -1205,7 +1304,9 @@ export function App(props: {
             <CommandPalette
               view={paletteView}
               onSelectItem={handlePaletteItem}
+              onHighlightItem={handlePaletteHighlight}
               selectedIndex={paletteSelectedIndex}
+              highlightedItemValue={addProjectBrowseHighlightedItemValue}
               theme={props.theme}
             />
           ) : visiblePanel === "help" ? (

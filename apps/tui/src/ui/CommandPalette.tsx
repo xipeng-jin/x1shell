@@ -1,5 +1,6 @@
 import type React from "react";
 import { formatActionKeys } from "../domain/keybindings.js";
+import { browseItemValue } from "../app/filesystemBrowse.js";
 import type { TuiPaletteItem, TuiPaletteViewModel } from "../app/paletteViewModel.js";
 import type { TuiTheme } from "../terminal/theme.js";
 import { displayText } from "../domain/display.js";
@@ -7,7 +8,9 @@ import { displayText } from "../domain/display.js";
 export function CommandPalette(props: {
   readonly view: TuiPaletteViewModel;
   readonly onSelectItem?: (item: TuiPaletteItem) => void;
+  readonly onHighlightItem?: (item: TuiPaletteItem) => void;
   readonly selectedIndex: number;
+  readonly highlightedItemValue?: string | null;
   readonly theme: TuiTheme;
 }): React.ReactNode {
   if (props.view.mode === "add-project-sources") {
@@ -57,23 +60,23 @@ export function CommandPalette(props: {
         {props.view.loading ? (
           <text fg={props.theme.palette.muted}>Browsing filesystem...</text>
         ) : null}
-        {props.view.items.map((item, index) =>
-          isBrowseItem(item) ? (
+        {props.view.items.map((item) => {
+          if (!isBrowseItem(item)) return null;
+          const value = browseItemValue(item);
+          const highlighted = value === (props.highlightedItemValue ?? null);
+          return (
             <text
               key={item.kind === "browse-up" ? "browse-up" : item.fullPath}
-              fg={
-                index === props.selectedIndex
-                  ? props.theme.palette.accent
-                  : props.theme.palette.text
-              }
+              fg={highlighted ? props.theme.palette.accent : props.theme.palette.text}
+              onMouseOver={() => props.onHighlightItem?.(item)}
               onMouseDown={() => props.onSelectItem?.(item)}
             >
-              {`${index === props.selectedIndex ? "> " : "  "}${displayText(
+              {`${highlighted ? "> " : "  "}${displayText(
                 item.kind === "browse-up" ? ".." : item.name,
               )}`}
             </text>
-          ) : null,
-        )}
+          );
+        })}
         {props.view.items.length === 0 && !props.view.loading && !props.view.error ? (
           <text fg={props.theme.palette.muted}>No directories found.</text>
         ) : null}

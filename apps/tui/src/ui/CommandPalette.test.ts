@@ -55,6 +55,7 @@ describe("CommandPalette", () => {
         ],
       }),
       selectedIndex: 0,
+      highlightedItemValue: null,
       theme: resolveTheme("dark"),
     });
     const text = flattenText(palette);
@@ -64,7 +65,28 @@ describe("CommandPalette", () => {
     expect(text).toContain("..");
     expect(text).toContain("repo-0");
     expect(text).toContain("repo-11");
+    expect(text).not.toContain("> repo-0");
     expect(text).not.toContain("Filesystem browsing starts in a later phase.");
+  });
+
+  it("renders Add Project browse highlight by stable item value", () => {
+    const palette = CommandPalette({
+      view: buildAddProjectBrowsePaletteView({
+        query: "~/Code/s",
+        items: [
+          { kind: "browse-directory", name: "src", fullPath: "/home/me/Code/src" },
+          { kind: "browse-directory", name: "scripts", fullPath: "/home/me/Code/scripts" },
+        ],
+      }),
+      selectedIndex: 0,
+      highlightedItemValue: "browse:/home/me/Code/scripts",
+      theme: resolveTheme("dark"),
+    });
+    const text = flattenText(palette);
+
+    expect(text).toContain("  src");
+    expect(text).toContain("> scripts");
+    expect(text).not.toContain("> src");
   });
 
   it("renders sanitized Add Project browse errors without the placeholder", () => {
