@@ -75,6 +75,7 @@ import {
   canHandlePrintableShortcut,
   composerAttachmentLimitMessage,
   appendPaletteQuery,
+  appendAddProjectBrowseQuery,
   isPlainTextSequence,
   parseComposerAttachmentInput,
 } from "./input.js";
@@ -105,7 +106,6 @@ import type { TuiServerStatusSnapshot } from "../state/serverConfigStore.js";
 import type { TuiShellState } from "../state/orchestrationStore.js";
 import type { ThreadDetailState } from "../state/threadDetailStore.js";
 import { SafeMarkdown } from "../terminal/safeMarkdown.js";
-import { sanitizeText } from "../terminal/safeTextStream.js";
 import type { TuiTheme } from "../terminal/theme.js";
 import { CommandPalette } from "../ui/CommandPalette.js";
 import { DebugPanel } from "../ui/DebugPanel.js";
@@ -140,7 +140,6 @@ const SIDEBAR_THREAD_TITLE_WIDTH =
 const COMPOSER_TEXTAREA_MIN_HEIGHT = 3;
 const COMPOSER_TEXTAREA_MAX_HEIGHT = 8;
 const COMPOSER_PENDING_TEXTAREA_MIN_HEIGHT = 2;
-const MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH = 512;
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 
 type LandingFocusArea = "projects" | "threads" | "timeline" | "composer" | "controls";
@@ -583,7 +582,7 @@ export function App(props: {
             handleBrowseItem(highlightedItem);
             return;
           }
-          submitAddProjectBrowsePath();
+          runAsyncAction(() => submitAddProjectBrowsePath(), setAddProjectBrowseError);
           return;
         }
         if (isPlainTextSequence(key)) {
@@ -866,16 +865,19 @@ export function App(props: {
     if (draftProjectId) props.onDraftAttachmentsChange?.(draftProjectId, attachments);
   }
 
-  function runAsyncAction(action: () => Promise<unknown> | unknown): void {
+  function runAsyncAction(
+    action: () => Promise<unknown> | unknown,
+    onError: (message: string) => void = setSubmitError,
+  ): void {
     try {
       const result = action();
       if (result && typeof (result as Promise<unknown>).then === "function") {
         void (result as Promise<unknown>).catch((error: unknown) => {
-          setSubmitError(displayText(String(error)));
+          onError(displayText(String(error)));
         });
       }
     } catch (error) {
-      setSubmitError(displayText(String(error)));
+      onError(displayText(String(error)));
     }
   }
 
@@ -957,7 +959,7 @@ export function App(props: {
     setAddProjectBrowseWindowStart(0);
   }
 
-  function submitAddProjectBrowsePath(): void {
+  async function submitAddProjectBrowsePath(): Promise<void> {
     const browsePlan = buildTuiFilesystemBrowseRequest({
       query: addProjectBrowseQuery,
       platform: browsePlatformFromEnvironmentOs(status.config?.environment.platform.os ?? null),
@@ -1010,23 +1012,9 @@ export function App(props: {
 
     const projectId = newProjectId();
     const title = inferProjectTitleFromPath(cwd);
-    try {
-      const result = props.onSubmitCommand(buildProjectCreate({ projectId, cwd }));
-      if (result && typeof (result as Promise<unknown>).then === "function") {
-        void (result as Promise<unknown>).then(
-          () => {
-            props.onCreatePendingProjectDraft?.({ projectId, workspaceRoot: cwd, title });
-            closePalette();
-          },
-          (error: unknown) => setAddProjectBrowseError(displayText(String(error))),
-        );
-      } else {
-        props.onCreatePendingProjectDraft({ projectId, workspaceRoot: cwd, title });
-        closePalette();
-      }
-    } catch (error) {
-      setAddProjectBrowseError(displayText(String(error)));
-    }
+    await props.onSubmitCommand(buildProjectCreate({ projectId, cwd }));
+    props.onCreatePendingProjectDraft({ projectId, workspaceRoot: cwd, title });
+    closePalette();
   }
 
   function selectAdjacentProject(direction: 1 | -1) {
@@ -2502,12 +2490,6 @@ function workspaceBasename(workspaceRoot: string): string {
   } catch {
     return "workspace";
   }
-}
-
-function appendAddProjectBrowseQuery(existing: string, sequence: string): string {
-  return sanitizeText(`${existing}${sequence}`)
-    .replace(/[\r\n]+/g, "")
-    .slice(0, MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH);
 }
 
 function findBrowsePaletteItem(

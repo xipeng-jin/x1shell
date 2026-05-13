@@ -5,8 +5,10 @@ import {
 } from "@t3tools/contracts";
 import { displayText } from "../domain/display.js";
 import { parseImageAttachmentText } from "../terminal/images.js";
+import { sanitizeText } from "../terminal/safeTextStream.js";
 
 const MAX_PALETTE_QUERY_LENGTH = 160;
+export const MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH = 512;
 
 export interface TuiKeyboardKey {
   readonly name: string;
@@ -52,4 +54,10 @@ export function composerAttachmentLimitMessage(): string {
 
 export function appendPaletteQuery(existing: string, sequence: string): string {
   return displayText(`${existing}${sequence}`).slice(0, MAX_PALETTE_QUERY_LENGTH);
+}
+
+export function appendAddProjectBrowseQuery(existing: string, sequence: string): string {
+  return sanitizeText(`${existing}${sequence}`)
+    .replace(/[\r\n]+/g, "")
+    .slice(0, MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH);
 }

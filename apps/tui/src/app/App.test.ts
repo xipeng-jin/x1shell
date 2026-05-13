@@ -13,7 +13,9 @@ import {
   canAppendComposerAttachment,
   canHandlePrintableShortcut,
   composerAttachmentLimitMessage,
+  appendAddProjectBrowseQuery,
   appendPaletteQuery,
+  MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH,
   isPlainTextSequence,
   parseComposerAttachmentInput,
 } from "./input.js";
@@ -184,6 +186,24 @@ describe("App headless smoke", () => {
 
     const hugeDataUrl = `data:image/png;base64,${"A".repeat(10_000)}`;
     expect(appendPaletteQuery("", hugeDataUrl)).toHaveLength(160);
+  });
+
+  it("keeps Add Project browse input raw except terminal-control stripping and path bounds", () => {
+    const query = appendAddProjectBrowseQuery(
+      "/repo/",
+      "token=valid-path\u001b]8;;https://evil.example\u0007link\nnested\rchild",
+    );
+
+    expect(query).toBe("/repo/token=valid-pathlinknestedchild");
+    expect(query).not.toContain("\u001b]8");
+    expect(query).not.toContain("evil.example");
+    expect(query).not.toContain("\n");
+    expect(query).not.toContain("\r");
+    expect(query).toContain("token=valid-path");
+
+    expect(appendAddProjectBrowseQuery("", "a".repeat(10_000))).toHaveLength(
+      MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH,
+    );
   });
 
   it("bounds composer image attachment count to the provider contract", () => {

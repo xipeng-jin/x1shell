@@ -13,7 +13,7 @@ import { createSafeTextStream, sanitizeText } from "../terminal/safeTextStream.j
 const TIMELINE_WINDOW = 40;
 
 export function displayText(value: string | null | undefined): string {
-  return sanitizeText(redactText(value ?? ""));
+  return sanitizeText(redactText(sanitizeText(value ?? "")));
 }
 
 export function displayProject(project: OrchestrationProjectShell) {

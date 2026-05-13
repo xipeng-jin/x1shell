@@ -140,6 +140,19 @@ describe("TUI orchestration command builders", () => {
     });
   });
 
+  it("keeps project create workspaceRoot canonical instead of display-redacting paths", () => {
+    vi.spyOn(crypto, "randomUUID").mockReturnValueOnce("00000000-0000-4000-8000-000000000043");
+
+    const command = buildProjectCreate({
+      projectId: "project-token-path" as never,
+      cwd: "/repo/token=valid-path",
+      now: "2026-04-28T12:00:00.000Z",
+    });
+
+    expect(command.workspaceRoot).toBe("/repo/token=valid-path");
+    expect(command.title).toBe("token=valid-path");
+  });
+
   it("builds Phase 8 model, runtime, and interaction commands", () => {
     vi.spyOn(crypto, "randomUUID")
       .mockReturnValueOnce("00000000-0000-4000-8000-000000000031")

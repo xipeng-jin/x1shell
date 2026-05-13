@@ -455,6 +455,28 @@ describe("TUI shell orchestration store", () => {
     });
   });
 
+  it("stores pending project draft metadata as canonical raw values", () => {
+    const store = createOrchestrationStore();
+    store.applyShellItem({ kind: "snapshot", snapshot: shellSnapshot(1, ["thread-a"]) });
+
+    store.createPendingProjectDraft({
+      projectId: "project-token-path" as never,
+      workspaceRoot: "/repo/token=valid-path",
+      title: "token=valid-path",
+    });
+
+    expect(store.getSnapshot()).toMatchObject({
+      selectedProjectId: "project-token-path",
+      selectedThreadId: null,
+      pendingProjectDraftByProjectId: {
+        "project-token-path": {
+          workspaceRoot: "/repo/token=valid-path",
+          title: "token=valid-path",
+        },
+      },
+    });
+  });
+
   it("clears pending project draft metadata when the project shell arrives", () => {
     const store = createOrchestrationStore();
     store.applyShellItem({ kind: "snapshot", snapshot: shellSnapshot(1, ["thread-a"]) });

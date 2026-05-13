@@ -107,6 +107,41 @@ describe("CommandPalette", () => {
     expect(text).not.toContain("evil.example");
     expect(text).not.toContain("Filesystem browsing starts in a later phase.");
   });
+
+  it("sanitizes raw Add Project browse query and directory names only at render time", () => {
+    const rawQuery =
+      "~/Code/token=valid-path\u001b]8;;https://evil.example/path?token=secret\u0007link\u001b]8;;\u0007";
+    const rawDirectoryName =
+      "repo-token=secret\u001b]8;;https://evil.example/path?token=secret\u0007name\u001b]8;;\u0007";
+    const view = buildAddProjectBrowsePaletteView({
+      query: rawQuery,
+      items: [
+        {
+          kind: "browse-directory",
+          name: rawDirectoryName,
+          fullPath: "/home/me/Code/repo-token=secret",
+        },
+      ],
+    });
+    const palette = CommandPalette({
+      view,
+      selectedIndex: 0,
+      highlightedItemValue: null,
+      theme: resolveTheme("dark"),
+    });
+    const text = flattenText(palette);
+
+    expect(view.query).toBe(rawQuery);
+    expect(view.items[0]).toMatchObject({ name: rawDirectoryName });
+    expect(text).toContain("~/Code/");
+    expect(text).toContain("repo-");
+    expect(text).not.toContain("token=valid-path");
+    expect(text).not.toContain("token=secret");
+    expect(text).not.toContain("link");
+    expect(text).not.toContain("name");
+    expect(text).not.toContain("\u001b]8");
+    expect(text).not.toContain("evil.example");
+  });
 });
 
 function flattenText(node: ReactNode): string {
