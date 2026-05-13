@@ -2,12 +2,18 @@ import type {
   ExecutionEnvironmentPlatformOs,
   FilesystemBrowseEntry,
   FilesystemBrowseInput,
+  FilesystemBrowseResult,
 } from "@t3tools/contracts";
 import {
+  appendBrowsePathSegment,
+  canNavigateUp,
+  getBrowseDirectoryPath,
   getBrowseLeafPathSegment,
+  getBrowseParentPath,
   hasTrailingPathSeparator,
   isExplicitRelativeProjectPath,
   isFilesystemBrowseQuery,
+  resolveProjectPathForDispatch,
 } from "@t3tools/shared/projectPaths";
 import type { TuiPaletteItem } from "./paletteViewModel.js";
 
@@ -76,12 +82,63 @@ export function browseEntriesToPaletteItems(entries: readonly FilesystemBrowseEn
   }));
 }
 
+export function browseItemsForQuery(input: {
+  readonly query: string;
+  readonly entries: readonly FilesystemBrowseEntry[];
+}): readonly TuiBrowsePaletteItem[] {
+  const browseDirectoryPath = getBrowseDirectoryPath(input.query);
+  const items: TuiBrowsePaletteItem[] = [];
+  if (canNavigateUp(browseDirectoryPath)) {
+    items.push({ kind: "browse-up" });
+  }
+  items.push(...browseEntriesToPaletteItems(input.entries));
+  return items;
+}
+
 export function browseFilterQueryFromPath(query: string): string {
   return hasTrailingPathSeparator(query) ? "" : getBrowseLeafPathSegment(query);
 }
 
 export function browseItemValue(item: TuiBrowsePaletteItem): string {
   return item.kind === "browse-up" ? BROWSE_UP_ITEM_VALUE : `browse:${item.fullPath}`;
+}
+
+export function executeBrowseItem(input: {
+  readonly query: string;
+  readonly item: TuiBrowsePaletteItem;
+}): string | null {
+  if (input.item.kind === "browse-up") {
+    return getBrowseParentPath(input.query);
+  }
+  return appendBrowsePathSegment(input.query, input.item.name);
+}
+
+export function resolveBrowseSubmitPath(input: {
+  readonly query: string;
+  readonly browseResult?: FilesystemBrowseResult | null;
+  readonly filteredEntries: readonly FilesystemBrowseEntry[];
+  readonly currentProjectWorkspaceRoot?: string | null;
+}): string {
+  const browseFilterQuery = browseFilterQueryFromPath(input.query);
+  const exactBrowseEntry =
+    browseFilterQuery.length > 0
+      ? (input.filteredEntries.find((entry) => entry.name === browseFilterQuery) ?? null)
+      : null;
+  const rawPath = hasTrailingPathSeparator(input.query)
+    ? (input.browseResult?.parentPath ?? input.query.trim())
+    : (exactBrowseEntry?.fullPath ?? input.query.trim());
+
+  return resolveProjectPathForDispatch(rawPath, input.currentProjectWorkspaceRoot);
+}
+
+export function isPrimaryEnterModifier(input: {
+  readonly key: { readonly ctrl?: boolean; readonly meta?: boolean };
+  readonly hostPlatform?: NodeJS.Platform;
+}): boolean {
+  const hostPlatform = input.hostPlatform ?? process.platform;
+  return hostPlatform === "darwin"
+    ? Boolean(input.key.meta && !input.key.ctrl)
+    : Boolean(input.key.ctrl && !input.key.meta);
 }
 
 export function filterBrowseEntries(input: {

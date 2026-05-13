@@ -86,14 +86,18 @@ import {
   type TuiPaletteMode,
 } from "./paletteViewModel.js";
 import {
-  browseEntriesToPaletteItems,
+  browseItemsForQuery,
   browseFilterQueryFromPath,
   browseItemValue,
   browseWindowStartForHighlight,
   browsePlatformFromEnvironmentOs,
   buildTuiFilesystemBrowseRequest,
+  executeBrowseItem,
   filterBrowseEntries,
+  isPrimaryEnterModifier,
   moveBrowseHighlight,
+  resolveBrowseSubmitPath,
+  type TuiBrowsePaletteItem,
 } from "./filesystemBrowse.js";
 import type { TuiServerStatusSnapshot } from "../state/serverConfigStore.js";
 import type { TuiShellState } from "../state/orchestrationStore.js";
@@ -130,6 +134,7 @@ const COMPOSER_TEXTAREA_MIN_HEIGHT = 3;
 const COMPOSER_TEXTAREA_MAX_HEIGHT = 8;
 const COMPOSER_PENDING_TEXTAREA_MIN_HEIGHT = 2;
 const MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH = 512;
+const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
 
 type LandingFocusArea = "projects" | "threads" | "timeline" | "composer" | "controls";
 type DraftControlContext = {
@@ -174,6 +179,10 @@ export function App(props: {
   ) => Promise<OrchestrationGetFullThreadDiffResult>;
   onRefreshVcsStatus?: (cwd: string) => Promise<VcsStatusResult>;
   onBrowseFilesystem?: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;
+  onSubmitAddProjectBrowsePath?: (input: {
+    readonly rawPath: string;
+    readonly resolvedPath: string;
+  }) => Promise<unknown> | unknown;
   debugEntries?: readonly TuiDebugEntry[];
   onRequestExit: () => void;
 }): React.ReactNode {
@@ -217,9 +226,8 @@ export function App(props: {
   const [paletteIntent, setPaletteIntent] = useState<PaletteIntent | null>(null);
   const [paletteQuery, setPaletteQuery] = useState("");
   const [addProjectBrowseQuery, setAddProjectBrowseQuery] = useState("");
-  const [addProjectBrowseEntries, setAddProjectBrowseEntries] = useState<
-    FilesystemBrowseResult["entries"]
-  >([]);
+  const [addProjectBrowseResult, setAddProjectBrowseResult] =
+    useState<FilesystemBrowseResult | null>(null);
   const [addProjectBrowseLoading, setAddProjectBrowseLoading] = useState(false);
   const [addProjectBrowseError, setAddProjectBrowseError] = useState<string | null>(null);
   const [addProjectBrowseHighlightedItemValue, setAddProjectBrowseHighlightedItemValue] = useState<
@@ -288,6 +296,7 @@ export function App(props: {
     activeThreadHeader?.interactionMode ??
     DEFAULT_PROVIDER_INTERACTION_MODE;
   const onBrowseFilesystem = props.onBrowseFilesystem;
+  const addProjectBrowseEntries = addProjectBrowseResult?.entries ?? EMPTY_BROWSE_ENTRIES;
   const selectedProvider = findProvider(status.config?.providers ?? [], selectedModelSelection);
   const banners = deriveErrorBanners({ status, provider: selectedProvider });
   const paletteActions = useMemo(() => filterPaletteActions(paletteQuery), [paletteQuery]);
@@ -311,8 +320,8 @@ export function App(props: {
     ],
   );
   const browsePaletteItems = useMemo(
-    () => browseEntriesToPaletteItems(browseFilteredEntries),
-    [browseFilteredEntries],
+    () => browseItemsForQuery({ query: addProjectBrowseQuery, entries: browseFilteredEntries }),
+    [addProjectBrowseQuery, browseFilteredEntries],
   );
   const browseWindowSize = Math.max(
     1,
@@ -398,7 +407,7 @@ export function App(props: {
     setPaletteMode("add-project-sources");
     setPaletteQuery("");
     setAddProjectBrowseQuery("");
-    setAddProjectBrowseEntries([]);
+    setAddProjectBrowseResult(null);
     setAddProjectBrowseLoading(false);
     setAddProjectBrowseError(null);
     setAddProjectBrowseHighlightedItemValue(null);
@@ -411,7 +420,7 @@ export function App(props: {
     const requestId = browseRequestRef.current;
 
     if (visiblePanel !== "palette" || paletteMode !== "add-project-browse") {
-      setAddProjectBrowseEntries([]);
+      setAddProjectBrowseResult(null);
       setAddProjectBrowseLoading(false);
       setAddProjectBrowseError(null);
       return;
@@ -424,21 +433,21 @@ export function App(props: {
     });
 
     if (browsePlan.kind === "skip") {
-      setAddProjectBrowseEntries([]);
+      setAddProjectBrowseResult(null);
       setAddProjectBrowseLoading(false);
       setAddProjectBrowseError(null);
       return;
     }
 
     if (browsePlan.kind === "error") {
-      setAddProjectBrowseEntries([]);
+      setAddProjectBrowseResult(null);
       setAddProjectBrowseLoading(false);
       setAddProjectBrowseError(displayText(browsePlan.message));
       return;
     }
 
     if (!onBrowseFilesystem) {
-      setAddProjectBrowseEntries([]);
+      setAddProjectBrowseResult(null);
       setAddProjectBrowseLoading(false);
       setAddProjectBrowseError(displayText("Not connected."));
       return;
@@ -450,13 +459,13 @@ export function App(props: {
       void onBrowseFilesystem(browsePlan.request).then(
         (result) => {
           if (browseRequestRef.current !== requestId) return;
-          setAddProjectBrowseEntries(result.entries);
+          setAddProjectBrowseResult(result);
           setAddProjectBrowseLoading(false);
           setAddProjectBrowseError(null);
         },
         (error) => {
           if (browseRequestRef.current !== requestId) return;
-          setAddProjectBrowseEntries([]);
+          setAddProjectBrowseResult(null);
           setAddProjectBrowseLoading(false);
           setAddProjectBrowseError(displayText(String(error)));
         },
@@ -551,6 +560,15 @@ export function App(props: {
           return;
         }
         if (key.name === "return" || key.name === "enter") {
+          const highlightedItem = findBrowsePaletteItem(
+            browsePaletteItems,
+            addProjectBrowseHighlightedItemValue,
+          );
+          if (highlightedItem && !isPrimaryEnterModifier({ key })) {
+            handleBrowseItem(highlightedItem);
+            return;
+          }
+          submitAddProjectBrowsePath();
           return;
         }
         if (isPlainTextSequence(key)) {
@@ -852,7 +870,7 @@ export function App(props: {
     setPaletteMode("actions");
     setPaletteQuery("");
     setAddProjectBrowseQuery("");
-    setAddProjectBrowseEntries([]);
+    setAddProjectBrowseResult(null);
     setAddProjectBrowseLoading(false);
     setAddProjectBrowseError(null);
     setAddProjectBrowseHighlightedItemValue(null);
@@ -865,7 +883,7 @@ export function App(props: {
     setPaletteMode("actions");
     setPaletteQuery("");
     setAddProjectBrowseQuery("");
-    setAddProjectBrowseEntries([]);
+    setAddProjectBrowseResult(null);
     setAddProjectBrowseLoading(false);
     setAddProjectBrowseError(null);
     setAddProjectBrowseHighlightedItemValue(null);
@@ -890,7 +908,7 @@ export function App(props: {
           addProjectBaseDirectory: status.config?.settings.addProjectBaseDirectory ?? null,
         }),
       );
-      setAddProjectBrowseEntries([]);
+      setAddProjectBrowseResult(null);
       setAddProjectBrowseLoading(false);
       setAddProjectBrowseError(null);
       setAddProjectBrowseHighlightedItemValue(null);
@@ -903,11 +921,67 @@ export function App(props: {
       setPaletteQuery("");
       runAsyncAction(() => performAction(item.id));
     }
+    if (item.kind === "browse-directory" || item.kind === "browse-up") {
+      handleBrowseItem(item);
+    }
   }
 
   function handlePaletteHighlight(item: TuiPaletteItem | undefined): void {
     if (!item || (item.kind !== "browse-directory" && item.kind !== "browse-up")) return;
     setAddProjectBrowseHighlightedItemValue(browseItemValue(item));
+  }
+
+  function handleBrowseItem(item: TuiBrowsePaletteItem): void {
+    const nextQuery = executeBrowseItem({ query: addProjectBrowseQuery, item });
+    if (nextQuery === null) return;
+    setAddProjectBrowseQuery(nextQuery);
+    setAddProjectBrowseResult(null);
+    setAddProjectBrowseLoading(false);
+    setAddProjectBrowseError(null);
+    setAddProjectBrowseHighlightedItemValue(null);
+    setAddProjectBrowseWindowStart(0);
+  }
+
+  function submitAddProjectBrowsePath(): void {
+    const browsePlan = buildTuiFilesystemBrowseRequest({
+      query: addProjectBrowseQuery,
+      platform: browsePlatformFromEnvironmentOs(status.config?.environment.platform.os ?? null),
+      activeProjectWorkspaceRoot: activeProject?.workspaceRoot ?? null,
+    });
+    if (browsePlan.kind === "skip") return;
+    if (browsePlan.kind === "error") {
+      setAddProjectBrowseError(displayText(browsePlan.message));
+      return;
+    }
+
+    const resolvedPath = resolveBrowseSubmitPath({
+      query: addProjectBrowseQuery,
+      browseResult: addProjectBrowseResult,
+      filteredEntries: browseFilteredEntries,
+      currentProjectWorkspaceRoot: activeProject?.workspaceRoot ?? null,
+    });
+    if (resolvedPath.length === 0) return;
+    if (!props.onSubmitAddProjectBrowsePath) {
+      setAddProjectBrowseError(displayText("Add Project submit is not available."));
+      return;
+    }
+
+    try {
+      const result = props.onSubmitAddProjectBrowsePath({
+        rawPath: addProjectBrowseQuery.trim(),
+        resolvedPath,
+      });
+      if (result && typeof (result as Promise<unknown>).then === "function") {
+        void (result as Promise<unknown>).then(
+          () => closePalette(),
+          (error: unknown) => setAddProjectBrowseError(displayText(String(error))),
+        );
+      } else {
+        closePalette();
+      }
+    } catch (error) {
+      setAddProjectBrowseError(displayText(String(error)));
+    }
   }
 
   function selectAdjacentProject(direction: 1 | -1) {
@@ -2386,6 +2460,14 @@ function appendAddProjectBrowseQuery(existing: string, sequence: string): string
   return sanitizeText(`${existing}${sequence}`)
     .replace(/[\r\n]+/g, "")
     .slice(0, MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH);
+}
+
+function findBrowsePaletteItem(
+  items: readonly TuiBrowsePaletteItem[],
+  value: string | null,
+): TuiBrowsePaletteItem | null {
+  if (value === null) return null;
+  return items.find((item) => browseItemValue(item) === value) ?? null;
 }
 
 function headerTitleMaxLength(input: {

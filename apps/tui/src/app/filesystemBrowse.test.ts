@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   buildTuiFilesystemBrowseRequest,
+  browseItemsForQuery,
   browseEntriesToPaletteItems,
   browseItemValue,
   browseWindowStartForHighlight,
+  executeBrowseItem,
   filterBrowseEntries,
   browsePlatformFromEnvironmentOs,
+  isPrimaryEnterModifier,
   moveBrowseHighlight,
   RELATIVE_BROWSE_REQUIRES_PROJECT_MESSAGE,
+  resolveBrowseSubmitPath,
 } from "./filesystemBrowse.js";
 
 describe("TUI filesystem browse helpers", () => {
@@ -233,5 +237,78 @@ describe("TUI filesystem browse helpers", () => {
         windowSize: 5,
       }),
     ).toBe(2);
+  });
+
+  it("adds browse-up only when the browse directory can navigate upward", () => {
+    expect(
+      browseItemsForQuery({
+        query: "~/Code/",
+        entries: [{ name: "x1shell", fullPath: "/home/me/Code/x1shell" }],
+      }),
+    ).toEqual([
+      { kind: "browse-up" },
+      { kind: "browse-directory", name: "x1shell", fullPath: "/home/me/Code/x1shell" },
+    ]);
+
+    expect(
+      browseItemsForQuery({
+        query: "~/Code",
+        entries: [{ name: "Code", fullPath: "/home/me/Code" }],
+      }),
+    ).toEqual([{ kind: "browse-directory", name: "Code", fullPath: "/home/me/Code" }]);
+  });
+
+  it("executes browse directory and browse-up items with shared path semantics", () => {
+    expect(
+      executeBrowseItem({
+        query: "~/Code/",
+        item: { kind: "browse-directory", name: "x1shell", fullPath: "/home/me/Code/x1shell" },
+      }),
+    ).toBe("~/Code/x1shell/");
+
+    expect(executeBrowseItem({ query: "~/Code/x1shell/", item: { kind: "browse-up" } })).toBe(
+      "~/Code/",
+    );
+    expect(executeBrowseItem({ query: "/", item: { kind: "browse-up" } })).toBeNull();
+  });
+
+  it("resolves Add Project submit paths from browse data before dispatch handoff", () => {
+    expect(
+      resolveBrowseSubmitPath({
+        query: "~/Code/x1shell/",
+        browseResult: { parentPath: "/home/me/Code/x1shell", entries: [] },
+        filteredEntries: [],
+      }),
+    ).toBe("/home/me/Code/x1shell");
+
+    expect(
+      resolveBrowseSubmitPath({
+        query: "~/Code/x1",
+        browseResult: {
+          parentPath: "/home/me/Code",
+          entries: [{ name: "x1", fullPath: "/home/me/Code/x1" }],
+        },
+        filteredEntries: [{ name: "x1", fullPath: "/home/me/Code/x1" }],
+      }),
+    ).toBe("/home/me/Code/x1");
+
+    expect(
+      resolveBrowseSubmitPath({
+        query: "./docs/",
+        browseResult: null,
+        filteredEntries: [],
+        currentProjectWorkspaceRoot: "/repo/app",
+      }),
+    ).toBe("/repo/app/docs");
+  });
+
+  it("uses the TUI host platform for modified Enter submit", () => {
+    expect(isPrimaryEnterModifier({ key: { ctrl: true }, hostPlatform: "linux" })).toBe(true);
+    expect(isPrimaryEnterModifier({ key: { meta: true }, hostPlatform: "linux" })).toBe(false);
+    expect(isPrimaryEnterModifier({ key: { meta: true }, hostPlatform: "darwin" })).toBe(true);
+    expect(isPrimaryEnterModifier({ key: { ctrl: true }, hostPlatform: "darwin" })).toBe(false);
+    expect(isPrimaryEnterModifier({ key: { ctrl: true, meta: true }, hostPlatform: "linux" })).toBe(
+      false,
+    );
   });
 });
