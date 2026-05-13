@@ -26,6 +26,11 @@ export type TuiBrowsePaletteItem = Extract<
   { readonly kind: "browse-directory" | "browse-up" }
 >;
 
+export type TuiFilesystemBrowseSnapshot = {
+  readonly request: FilesystemBrowseInput;
+  readonly result: FilesystemBrowseResult;
+};
+
 export function browsePlatformFromEnvironmentOs(
   os: ExecutionEnvironmentPlatformOs | null | undefined,
 ): string {
@@ -71,6 +76,23 @@ export function buildTuiFilesystemBrowseRequest(input: {
       ...(input.activeProjectWorkspaceRoot ? { cwd: input.activeProjectWorkspaceRoot } : {}),
     },
   };
+}
+
+export function filesystemBrowseRequestsEqual(
+  left: FilesystemBrowseInput,
+  right: FilesystemBrowseInput,
+): boolean {
+  return left.partialPath === right.partialPath && (left.cwd ?? null) === (right.cwd ?? null);
+}
+
+export function filesystemBrowseResultForRequest(input: {
+  readonly browsePlan: ReturnType<typeof buildTuiFilesystemBrowseRequest>;
+  readonly snapshot?: TuiFilesystemBrowseSnapshot | null;
+}): FilesystemBrowseResult | null {
+  if (input.browsePlan.kind !== "browse" || !input.snapshot) return null;
+  return filesystemBrowseRequestsEqual(input.browsePlan.request, input.snapshot.request)
+    ? input.snapshot.result
+    : null;
 }
 
 export function browseEntriesToPaletteItems(entries: readonly FilesystemBrowseEntry[]): readonly {

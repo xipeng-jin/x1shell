@@ -98,9 +98,12 @@ import {
   buildTuiFilesystemBrowseRequest,
   executeBrowseItem,
   filterBrowseEntries,
+  filesystemBrowseRequestsEqual,
+  filesystemBrowseResultForRequest,
   isPrimaryEnterModifier,
   moveBrowseHighlight,
   resolveBrowseSubmitPath,
+  type TuiFilesystemBrowseSnapshot,
   type TuiBrowsePaletteItem,
 } from "./filesystemBrowse.js";
 import type { TuiServerStatusSnapshot } from "../state/serverConfigStore.js";
@@ -241,8 +244,8 @@ export function App(props: {
   const [paletteIntent, setPaletteIntent] = useState<PaletteIntent | null>(null);
   const [paletteQuery, setPaletteQuery] = useState("");
   const [addProjectBrowseQuery, setAddProjectBrowseQuery] = useState("");
-  const [addProjectBrowseResult, setAddProjectBrowseResult] =
-    useState<FilesystemBrowseResult | null>(null);
+  const [addProjectBrowseSnapshot, setAddProjectBrowseSnapshot] =
+    useState<TuiFilesystemBrowseSnapshot | null>(null);
   const [addProjectBrowseLoading, setAddProjectBrowseLoading] = useState(false);
   const [addProjectBrowseError, setAddProjectBrowseError] = useState<string | null>(null);
   const [addProjectBrowseHighlightedItemValue, setAddProjectBrowseHighlightedItemValue] = useState<
@@ -311,6 +314,19 @@ export function App(props: {
     activeThreadHeader?.interactionMode ??
     DEFAULT_PROVIDER_INTERACTION_MODE;
   const onBrowseFilesystem = props.onBrowseFilesystem;
+  const currentAddProjectBrowsePlan = useMemo(
+    () =>
+      buildTuiFilesystemBrowseRequest({
+        query: addProjectBrowseQuery,
+        platform: browsePlatformFromEnvironmentOs(status.config?.environment.platform.os ?? null),
+        activeProjectWorkspaceRoot: activeProject?.workspaceRoot ?? null,
+      }),
+    [activeProject?.workspaceRoot, addProjectBrowseQuery, status.config?.environment.platform.os],
+  );
+  const addProjectBrowseResult = filesystemBrowseResultForRequest({
+    browsePlan: currentAddProjectBrowsePlan,
+    snapshot: addProjectBrowseSnapshot,
+  });
   const addProjectBrowseEntries = addProjectBrowseResult?.entries ?? EMPTY_BROWSE_ENTRIES;
   const selectedProvider = findProvider(status.config?.providers ?? [], selectedModelSelection);
   const banners = deriveErrorBanners({ status, provider: selectedProvider });
@@ -416,7 +432,7 @@ export function App(props: {
     setPaletteMode("add-project-sources");
     setPaletteQuery("");
     setAddProjectBrowseQuery("");
-    setAddProjectBrowseResult(null);
+    setAddProjectBrowseSnapshot(null);
     setAddProjectBrowseLoading(false);
     setAddProjectBrowseError(null);
     setAddProjectBrowseHighlightedItemValue(null);
@@ -429,52 +445,53 @@ export function App(props: {
     const requestId = browseRequestRef.current;
 
     if (visiblePanel !== "palette" || paletteMode !== "add-project-browse") {
-      setAddProjectBrowseResult(null);
+      setAddProjectBrowseSnapshot(null);
       setAddProjectBrowseLoading(false);
       setAddProjectBrowseError(null);
       return;
     }
 
-    const browsePlan = buildTuiFilesystemBrowseRequest({
-      query: addProjectBrowseQuery,
-      platform: browsePlatformFromEnvironmentOs(status.config?.environment.platform.os ?? null),
-      activeProjectWorkspaceRoot: activeProject?.workspaceRoot ?? null,
-    });
+    const browsePlan = currentAddProjectBrowsePlan;
 
     if (browsePlan.kind === "skip") {
-      setAddProjectBrowseResult(null);
+      setAddProjectBrowseSnapshot(null);
       setAddProjectBrowseLoading(false);
       setAddProjectBrowseError(null);
       return;
     }
 
     if (browsePlan.kind === "error") {
-      setAddProjectBrowseResult(null);
+      setAddProjectBrowseSnapshot(null);
       setAddProjectBrowseLoading(false);
       setAddProjectBrowseError(displayText(browsePlan.message));
       return;
     }
 
     if (!onBrowseFilesystem) {
-      setAddProjectBrowseResult(null);
+      setAddProjectBrowseSnapshot(null);
       setAddProjectBrowseLoading(false);
       setAddProjectBrowseError(displayText("Not connected."));
       return;
     }
 
+    setAddProjectBrowseSnapshot((snapshot) =>
+      snapshot && filesystemBrowseRequestsEqual(snapshot.request, browsePlan.request)
+        ? snapshot
+        : null,
+    );
     setAddProjectBrowseLoading(true);
     setAddProjectBrowseError(null);
     const timer = setTimeout(() => {
       void onBrowseFilesystem(browsePlan.request).then(
         (result) => {
           if (browseRequestRef.current !== requestId) return;
-          setAddProjectBrowseResult(result);
+          setAddProjectBrowseSnapshot({ request: browsePlan.request, result });
           setAddProjectBrowseLoading(false);
           setAddProjectBrowseError(null);
         },
         (error) => {
           if (browseRequestRef.current !== requestId) return;
-          setAddProjectBrowseResult(null);
+          setAddProjectBrowseSnapshot(null);
           setAddProjectBrowseLoading(false);
           setAddProjectBrowseError(displayText(String(error)));
         },
@@ -482,14 +499,7 @@ export function App(props: {
     }, 80);
 
     return () => clearTimeout(timer);
-  }, [
-    activeProject?.workspaceRoot,
-    addProjectBrowseQuery,
-    onBrowseFilesystem,
-    paletteMode,
-    status.config?.environment.platform.os,
-    visiblePanel,
-  ]);
+  }, [currentAddProjectBrowsePlan, onBrowseFilesystem, paletteMode, visiblePanel]);
 
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") {
@@ -566,6 +576,8 @@ export function App(props: {
             setAddProjectBrowseHighlightedItemValue(null);
             setAddProjectBrowseWindowStart(0);
           } else {
+            setAddProjectBrowseHighlightedItemValue(null);
+            setAddProjectBrowseWindowStart(0);
             setAddProjectBrowseQuery(nextBackspaceState.query);
           }
           return;
@@ -583,6 +595,8 @@ export function App(props: {
           return;
         }
         if (isPlainTextSequence(key)) {
+          setAddProjectBrowseHighlightedItemValue(null);
+          setAddProjectBrowseWindowStart(0);
           setAddProjectBrowseQuery((query) => appendAddProjectBrowseQuery(query, key.sequence));
           return;
         }
@@ -884,7 +898,7 @@ export function App(props: {
     setPaletteMode("actions");
     setPaletteQuery("");
     setAddProjectBrowseQuery("");
-    setAddProjectBrowseResult(null);
+    setAddProjectBrowseSnapshot(null);
     setAddProjectBrowseLoading(false);
     setAddProjectBrowseError(null);
     setAddProjectBrowseHighlightedItemValue(null);
@@ -897,7 +911,7 @@ export function App(props: {
     setPaletteMode("actions");
     setPaletteQuery("");
     setAddProjectBrowseQuery("");
-    setAddProjectBrowseResult(null);
+    setAddProjectBrowseSnapshot(null);
     setAddProjectBrowseLoading(false);
     setAddProjectBrowseError(null);
     setAddProjectBrowseHighlightedItemValue(null);
@@ -922,7 +936,7 @@ export function App(props: {
           addProjectBaseDirectory: status.config?.settings.addProjectBaseDirectory ?? null,
         }),
       );
-      setAddProjectBrowseResult(null);
+      setAddProjectBrowseSnapshot(null);
       setAddProjectBrowseLoading(false);
       setAddProjectBrowseError(null);
       setAddProjectBrowseHighlightedItemValue(null);
@@ -949,7 +963,7 @@ export function App(props: {
     const nextQuery = executeBrowseItem({ query: addProjectBrowseQuery, item });
     if (nextQuery === null) return;
     setAddProjectBrowseQuery(nextQuery);
-    setAddProjectBrowseResult(null);
+    setAddProjectBrowseSnapshot(null);
     setAddProjectBrowseLoading(false);
     setAddProjectBrowseError(null);
     setAddProjectBrowseHighlightedItemValue(null);
@@ -957,11 +971,7 @@ export function App(props: {
   }
 
   async function submitAddProjectBrowsePath(): Promise<void> {
-    const browsePlan = buildTuiFilesystemBrowseRequest({
-      query: addProjectBrowseQuery,
-      platform: browsePlatformFromEnvironmentOs(status.config?.environment.platform.os ?? null),
-      activeProjectWorkspaceRoot: activeProject?.workspaceRoot ?? null,
-    });
+    const browsePlan = currentAddProjectBrowsePlan;
     if (browsePlan.kind === "skip") return;
     if (browsePlan.kind === "error") {
       setAddProjectBrowseError(displayText(browsePlan.message));

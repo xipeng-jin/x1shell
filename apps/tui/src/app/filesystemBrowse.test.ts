@@ -7,6 +7,8 @@ import {
   browseWindowStartForHighlight,
   executeBrowseItem,
   filterBrowseEntries,
+  filesystemBrowseRequestsEqual,
+  filesystemBrowseResultForRequest,
   browsePlatformFromEnvironmentOs,
   isPrimaryEnterModifier,
   moveBrowseHighlight,
@@ -44,6 +46,66 @@ describe("TUI filesystem browse helpers", () => {
       kind: "browse",
       request: { partialPath: "~/Code/", cwd: "/repo/current" },
     });
+  });
+
+  it("matches browse requests by partial path and cwd", () => {
+    expect(
+      filesystemBrowseRequestsEqual({ partialPath: "/repo/" }, { partialPath: "/repo/" }),
+    ).toBe(true);
+    expect(
+      filesystemBrowseRequestsEqual({ partialPath: "/repo/" }, { partialPath: "/other/" }),
+    ).toBe(false);
+    expect(
+      filesystemBrowseRequestsEqual(
+        { partialPath: "./", cwd: "/repo/app" },
+        { partialPath: "./", cwd: "/repo/app" },
+      ),
+    ).toBe(true);
+    expect(
+      filesystemBrowseRequestsEqual(
+        { partialPath: "./", cwd: "/repo/app" },
+        { partialPath: "./", cwd: "/repo/other" },
+      ),
+    ).toBe(false);
+    expect(
+      filesystemBrowseRequestsEqual({ partialPath: "./" }, { partialPath: "./", cwd: "/repo/app" }),
+    ).toBe(false);
+  });
+
+  it("returns browse results only for the current browse request", () => {
+    const snapshot = {
+      request: { partialPath: "/old/" },
+      result: {
+        parentPath: "/old",
+        entries: [{ name: "repo", fullPath: "/old/repo" }],
+      },
+    };
+
+    expect(
+      filesystemBrowseResultForRequest({
+        browsePlan: { kind: "browse", request: { partialPath: "/old/" } },
+        snapshot,
+      }),
+    ).toEqual(snapshot.result);
+
+    expect(
+      filesystemBrowseResultForRequest({
+        browsePlan: { kind: "browse", request: { partialPath: "/new/" } },
+        snapshot,
+      }),
+    ).toBeNull();
+    expect(
+      filesystemBrowseResultForRequest({
+        browsePlan: { kind: "browse", request: { partialPath: "/old/", cwd: "/repo/app" } },
+        snapshot,
+      }),
+    ).toBeNull();
+    expect(
+      filesystemBrowseResultForRequest({
+        browsePlan: { kind: "skip" },
+        snapshot,
+      }),
+    ).toBeNull();
   });
 
   it("skips non-filesystem browse queries", () => {
