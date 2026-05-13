@@ -136,6 +136,19 @@ export function createOrchestrationStore(
       readonly workspaceRoot: string;
       readonly title: string;
     }) => {
+      if (state.projects.some((project) => project.id === input.projectId)) {
+        setState({
+          ...state,
+          selectedProjectId: input.projectId,
+          selectedThreadId: null,
+          pendingProjectDraftByProjectId: omitRecordKey(
+            state.pendingProjectDraftByProjectId,
+            input.projectId,
+          ),
+        });
+        return;
+      }
+
       setState({
         ...state,
         selectedProjectId: input.projectId,

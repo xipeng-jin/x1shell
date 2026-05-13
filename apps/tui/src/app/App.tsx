@@ -71,11 +71,12 @@ import {
   derivePendingUserInputs,
 } from "../domain/pendingActions.js";
 import {
+  applyAddProjectBrowseBackspace,
+  appendAddProjectBrowseQuery,
+  appendPaletteQuery,
   canAppendComposerAttachment,
   canHandlePrintableShortcut,
   composerAttachmentLimitMessage,
-  appendPaletteQuery,
-  appendAddProjectBrowseQuery,
   isPlainTextSequence,
   parseComposerAttachmentInput,
 } from "./input.js";
@@ -557,13 +558,15 @@ export function App(props: {
           return;
         }
         if (key.name === "backspace") {
-          if (addProjectBrowseQuery.length === 0) {
+          const nextBackspaceState = applyAddProjectBrowseBackspace(addProjectBrowseQuery);
+          if (nextBackspaceState.kind === "sources") {
             setPaletteMode("add-project-sources");
             setPaletteSelectedIndex(0);
+            setAddProjectBrowseQuery("");
             setAddProjectBrowseHighlightedItemValue(null);
             setAddProjectBrowseWindowStart(0);
           } else {
-            setAddProjectBrowseQuery((query) => query.slice(0, -1));
+            setAddProjectBrowseQuery(nextBackspaceState.query);
           }
           return;
         }

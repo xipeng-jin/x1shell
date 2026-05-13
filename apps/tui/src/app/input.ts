@@ -61,3 +61,15 @@ export function appendAddProjectBrowseQuery(existing: string, sequence: string):
     .replace(/[\r\n]+/g, "")
     .slice(0, MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH);
 }
+
+export function applyAddProjectBrowseBackspace(query: string):
+  | {
+      readonly kind: "browse";
+      readonly query: string;
+    }
+  | {
+      readonly kind: "sources";
+    } {
+  const nextQuery = query.slice(0, -1);
+  return nextQuery.length === 0 ? { kind: "sources" } : { kind: "browse", query: nextQuery };
+}

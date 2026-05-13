@@ -499,6 +499,31 @@ describe("TUI shell orchestration store", () => {
     });
   });
 
+  it("does not add pending project metadata when the project shell already exists", () => {
+    const store = createOrchestrationStore();
+    store.applyShellItem({
+      kind: "snapshot",
+      snapshot: {
+        snapshotSequence: 1,
+        updatedAt: "2026-04-28T00:00:00.000Z",
+        projects: [projectShell("project-a"), projectShell("project-new", "/repo/new")],
+        threads: [threadShell("thread-a", "project-a", "Thread A")],
+      },
+    });
+
+    store.createPendingProjectDraft({
+      projectId: "project-new" as never,
+      workspaceRoot: "/repo/stale",
+      title: "stale",
+    });
+
+    expect(store.getSnapshot()).toMatchObject({
+      selectedProjectId: "project-new",
+      selectedThreadId: null,
+      pendingProjectDraftByProjectId: {},
+    });
+  });
+
   it("clears pending project draft metadata from fresh snapshots and project removal", () => {
     const store = createOrchestrationStore();
     store.applyShellItem({ kind: "snapshot", snapshot: shellSnapshot(1, ["thread-a"]) });

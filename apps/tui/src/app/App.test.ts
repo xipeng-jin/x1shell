@@ -18,6 +18,7 @@ import {
   MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH,
   isPlainTextSequence,
   parseComposerAttachmentInput,
+  applyAddProjectBrowseBackspace,
 } from "./input.js";
 
 const TUI_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -204,6 +205,12 @@ describe("App headless smoke", () => {
     expect(appendAddProjectBrowseQuery("", "a".repeat(10_000))).toHaveLength(
       MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH,
     );
+  });
+
+  it("returns Add Project browse to sources when Backspace deletes the final character", () => {
+    expect(applyAddProjectBrowseBackspace("~/")).toEqual({ kind: "browse", query: "~" });
+    expect(applyAddProjectBrowseBackspace("a")).toEqual({ kind: "sources" });
+    expect(applyAddProjectBrowseBackspace("")).toEqual({ kind: "sources" });
   });
 
   it("bounds composer image attachment count to the provider contract", () => {
