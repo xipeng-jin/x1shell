@@ -684,6 +684,7 @@ export default function ChatView(props: ChatViewProps) {
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
   const localComposerRef = useRef<ChatComposerHandle | null>(null);
   const composerRef = useComposerHandleContext() ?? localComposerRef;
+  const readComposerHandle = useCallback(() => composerRef.current, [composerRef]);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
@@ -1780,16 +1781,19 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   const focusComposer = useCallback(() => {
-    composerRef.current?.focusAtEnd();
-  }, []);
+    readComposerHandle()?.focusAtEnd();
+  }, [readComposerHandle]);
   const scheduleComposerFocus = useCallback(() => {
     window.requestAnimationFrame(() => {
       focusComposer();
     });
   }, [focusComposer]);
-  const addTerminalContextToDraft = useCallback((selection: TerminalContextSelection) => {
-    composerRef.current?.addTerminalContext(selection);
-  }, []);
+  const addTerminalContextToDraft = useCallback(
+    (selection: TerminalContextSelection) => {
+      readComposerHandle()?.addTerminalContext(selection);
+    },
+    [readComposerHandle],
+  );
   const setTerminalOpen = useCallback(
     (open: boolean) => {
       if (!activeThreadRef) return;
@@ -2467,7 +2471,7 @@ export default function ChatView(props: ChatViewProps) {
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
-        modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
+        modelPickerOpen: readComposerHandle()?.isModelPickerOpen() ?? false,
       };
 
       const command = resolveShortcutCommand(event, keybindings, {
@@ -2520,7 +2524,7 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "modelPicker.toggle") {
         event.preventDefault();
         event.stopPropagation();
-        composerRef.current?.toggleModelPicker();
+        readComposerHandle()?.toggleModelPicker();
         return;
       }
 
@@ -2546,6 +2550,7 @@ export default function ChatView(props: ChatViewProps) {
     splitTerminal,
     keybindings,
     onToggleDiff,
+    readComposerHandle,
     toggleTerminalVisibility,
   ]);
 
@@ -3019,9 +3024,9 @@ export default function ChatView(props: ChatViewProps) {
         };
       });
       promptRef.current = "";
-      composerRef.current?.resetCursorState({ cursor: 0 });
+      readComposerHandle()?.resetCursorState({ cursor: 0 });
     },
-    [activePendingProgress?.activeQuestion, activePendingUserInput],
+    [activePendingProgress?.activeQuestion, activePendingUserInput, readComposerHandle],
   );
 
   const onChangeActivePendingUserInputCustomAnswer = useCallback(
@@ -3046,16 +3051,16 @@ export default function ChatView(props: ChatViewProps) {
           ),
         },
       }));
-      const snapshot = composerRef.current?.readSnapshot();
+      const snapshot = readComposerHandle()?.readSnapshot();
       if (
         snapshot?.value !== value ||
         snapshot.cursor !== nextCursor ||
         snapshot.expandedCursor !== expandedCursor
       ) {
-        composerRef.current?.focusAt(nextCursor);
+        readComposerHandle()?.focusAt(nextCursor);
       }
     },
-    [activePendingUserInput],
+    [activePendingUserInput, readComposerHandle],
   );
 
   const onAdvanceActivePendingUserInput = useCallback(() => {
@@ -3109,7 +3114,7 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
-      const sendCtx = composerRef.current?.getSendContext();
+      const sendCtx = readComposerHandle()?.getSendContext();
       if (!sendCtx) {
         return;
       }
@@ -3227,6 +3232,7 @@ export default function ChatView(props: ChatViewProps) {
       setThreadError,
       autoOpenPlanSidebar,
       environmentId,
+      readComposerHandle,
     ],
   );
 
@@ -3246,7 +3252,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
 
-    const sendCtx = composerRef.current?.getSendContext();
+    const sendCtx = readComposerHandle()?.getSendContext();
     if (!sendCtx) {
       return;
     }
@@ -3364,6 +3370,7 @@ export default function ChatView(props: ChatViewProps) {
     runtimeMode,
     autoOpenPlanSidebar,
     environmentId,
+    readComposerHandle,
   ]);
 
   const onProviderModelSelect = useCallback(
