@@ -1,3 +1,4 @@
+import { ensureBrowseDirectoryPath } from "@t3tools/shared/projectPaths";
 import type { TuiActionId, TuiActionDefinition } from "../domain/keybindings.js";
 
 export type TuiPaletteMode = "actions" | "add-project-sources" | "add-project-browse";
@@ -88,19 +89,4 @@ export function initialAddProjectBrowseQuery(input: {
 }): string {
   const baseDirectory = input.addProjectBaseDirectory?.trim();
   return baseDirectory ? ensureBrowseDirectoryPath(baseDirectory) : "~/";
-}
-
-function ensureBrowseDirectoryPath(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length === 0 || /[/\\]$/.test(trimmed)) {
-    return trimmed;
-  }
-  return `${trimmed}${preferredPathSeparator(trimmed)}`;
-}
-
-function preferredPathSeparator(value: string): "/" | "\\" {
-  if (/^[a-zA-Z]:([/\\]|$)/.test(value) || value.startsWith("\\\\")) {
-    return "\\";
-  }
-  return value.includes("\\") ? "\\" : "/";
 }

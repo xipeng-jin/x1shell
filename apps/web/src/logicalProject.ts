@@ -1,7 +1,7 @@
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
 import type { ScopedProjectRef, SidebarProjectGroupingMode } from "@t3tools/contracts";
+import { normalizeProjectPathForComparison } from "@t3tools/shared/projectPaths";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
-import { normalizeProjectPathForComparison } from "./lib/projectPaths";
 import type { Project } from "./types";
 
 export interface ProjectGroupingSettings {
