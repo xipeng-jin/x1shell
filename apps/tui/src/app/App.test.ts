@@ -20,10 +20,38 @@ import {
   parseComposerAttachmentInput,
   applyAddProjectBrowseBackspace,
 } from "./input.js";
+import { resolveCommandPaletteFrame } from "./commandPaletteFrame.js";
 
 const TUI_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const HEADLESS_SMOKE_TEST_TIMEOUT_MS = 15_000;
 const HEADLESS_SMOKE_CHILD_TIMEOUT_MS = 12_000;
+
+describe("resolveCommandPaletteFrame", () => {
+  it("centers the palette against the full viewport and places it at the web top offset", () => {
+    expect(resolveCommandPaletteFrame({ viewportColumns: 120, viewportRows: 30 })).toEqual({
+      left: 18,
+      top: 3,
+      width: 84,
+      height: 18,
+    });
+  });
+
+  it("does not reserve a sidebar gutter when centering the palette", () => {
+    const frame = resolveCommandPaletteFrame({ viewportColumns: 120, viewportRows: 30 });
+
+    expect(frame.left).toBe(18);
+    expect(frame.left).not.toBe(36);
+  });
+
+  it("uses compact viewport bounds while preserving the web-relative top offset", () => {
+    expect(resolveCommandPaletteFrame({ viewportColumns: 60, viewportRows: 20 })).toEqual({
+      left: 4,
+      top: 2,
+      width: 52,
+      height: 14,
+    });
+  });
+});
 
 describe("App headless smoke", () => {
   it(

@@ -123,12 +123,9 @@ import {
   getLatestVisibleThreadForProject,
   resolveAddProjectSubmitPath,
 } from "./addProjectSubmit.js";
+import { resolveCommandPaletteFrame } from "./commandPaletteFrame.js";
 
 const MAX_DIFF_CACHE_ENTRIES = 12;
-const COMMAND_PALETTE_WIDTH = 84;
-const COMMAND_PALETTE_MAX_WIDTH_MARGIN = 8;
-const COMMAND_PALETTE_HEIGHT = 18;
-const COMMAND_PALETTE_MIN_HEIGHT = 10;
 const BROWSE_PALETTE_STATIC_ROW_COUNT = 7;
 const HEADER_THREAD_TITLE_MAX_LENGTH = 44;
 const SIDEBAR_THREAD_TIMESTAMP_WIDTH = 4;
@@ -350,7 +347,6 @@ export function App(props: {
   const paletteFrame = resolveCommandPaletteFrame({
     viewportColumns: dimensions.width,
     viewportRows: dimensions.height,
-    sidebarWidth: layout.showSidebar ? layout.sidebarWidth + 1 : 0,
   });
   const browsePaletteItems = useMemo(
     () => browseItemsForQuery({ query: addProjectBrowseQuery, entries: browseFilteredEntries }),
@@ -1510,32 +1506,6 @@ export function App(props: {
       ) : null}
     </box>
   );
-}
-
-function resolveCommandPaletteFrame(input: {
-  readonly viewportColumns: number;
-  readonly viewportRows: number;
-  readonly sidebarWidth: number;
-}): {
-  readonly left: number;
-  readonly top: number;
-  readonly width: number;
-  readonly height: number;
-} {
-  const mainLeft = input.sidebarWidth;
-  const mainWidth = Math.max(1, input.viewportColumns - mainLeft);
-  const availableWidth = Math.max(24, mainWidth - COMMAND_PALETTE_MAX_WIDTH_MARGIN);
-  const width = Math.min(COMMAND_PALETTE_WIDTH, availableWidth);
-  const height = Math.max(
-    COMMAND_PALETTE_MIN_HEIGHT,
-    Math.min(COMMAND_PALETTE_HEIGHT, input.viewportRows - 6),
-  );
-  return {
-    left: mainLeft + Math.max(0, Math.floor((mainWidth - width) / 2)),
-    top: Math.max(1, input.viewportRows - height - 5),
-    width,
-    height,
-  };
 }
 
 function PendingApprovalPanel(props: {
