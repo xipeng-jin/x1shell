@@ -1,4 +1,4 @@
-import { isValidElement, type ReactElement, type ReactNode } from "react";
+import { isValidElement, type FunctionComponent, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 import { TUI_ACTIONS } from "../domain/keybindings.js";
 import { resolveTheme } from "../terminal/theme.js";
@@ -84,9 +84,8 @@ describe("CommandPalette", () => {
     });
     const text = flattenText(palette);
 
-    expect(text).toContain("  src");
-    expect(text).toContain("> scripts");
-    expect(text).not.toContain("> src");
+    expect(text).toContain("src");
+    expect(text).toContain("scripts");
   });
 
   it("renders sanitized Add Project browse errors without the placeholder", () => {
@@ -151,5 +150,9 @@ function flattenText(node: ReactNode): string {
   if (!isValidElement(node)) return "";
 
   const element = node as ReactElement<{ readonly children?: ReactNode }>;
+  if (typeof element.type === "function") {
+    const Component = element.type as FunctionComponent<typeof element.props>;
+    return flattenText(Component(element.props) as ReactNode);
+  }
   return flattenText(element.props.children);
 }

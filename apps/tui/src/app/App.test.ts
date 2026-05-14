@@ -68,6 +68,29 @@ describe("App headless smoke", () => {
   );
 
   it(
+    "opens Add Project from the sidebar plus and browses server filesystem entries",
+    () => {
+      const dir = createTempDir("x1shell-tui-add-project-smoke-");
+      const framePath = join(dir, "frames.txt");
+      execFileSync("bun", ["run", "src/test/openTuiAddProjectPaletteSmoke.tsx", framePath], {
+        cwd: TUI_PACKAGE_DIR,
+        stdio: "pipe",
+        timeout: HEADLESS_SMOKE_CHILD_TIMEOUT_MS,
+      });
+
+      const frames = readFileSync(framePath, "utf8");
+      expect(frames).toContain("Add project");
+      expect(frames).toContain("Sources");
+      expect(frames).toContain("Local folder");
+      expect(frames).toContain("Add project / Local folder");
+      expect(frames).toContain("~/");
+      expect(frames).toContain("workspace");
+      expect(frames).not.toContain("token=secret");
+    },
+    HEADLESS_SMOKE_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "captures a compact logo boot frame on narrow terminals",
     () => {
       const dir = createTempDir("x1shell-tui-narrow-");
