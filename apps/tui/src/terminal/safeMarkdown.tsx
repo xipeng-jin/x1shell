@@ -199,21 +199,22 @@ function keyedLines(
 ): Array<{ key: string; line: string }> {
   const counts = new Map<string, number>();
   return lines.map((line) => {
-    const count = counts.get(line) ?? 0;
-    counts.set(line, count + 1);
-    return { key: `${prefix}:${count}:${line}`, line };
+    const fingerprint = stableLineFingerprint(line);
+    const count = counts.get(fingerprint) ?? 0;
+    counts.set(fingerprint, count + 1);
+    return { key: `${prefix}:${fingerprint}:${count}`, line };
   });
 }
 
 function neutralizeMarkdownLinks(value: string): string {
-  let output = "";
+  const output: string[] = [];
   let index = 0;
 
   while (index < value.length) {
     const image = value[index] === "!" && value[index + 1] === "[";
     const link = value[index] === "[";
     if (!image && !link) {
-      output += value[index];
+      output.push(value[index] ?? "");
       index += 1;
       continue;
     }
@@ -221,24 +222,24 @@ function neutralizeMarkdownLinks(value: string): string {
     const labelStart = index + (image ? 2 : 1);
     const labelEnd = findClosing(value, labelStart, "]");
     if (labelEnd === null || value[labelEnd + 1] !== "(") {
-      output += value[index];
+      output.push(value[index] ?? "");
       index += 1;
       continue;
     }
 
     const destinationEnd = findClosing(value, labelEnd + 2, ")");
     if (destinationEnd === null) {
-      output += value[index];
+      output.push(value[index] ?? "");
       index += 1;
       continue;
     }
 
     const label = value.slice(labelStart, labelEnd).trim();
-    output += image ? `[image: ${label || "image"}]` : label;
+    output.push(image ? `[image: ${label || "image"}]` : label);
     index = destinationEnd + 1;
   }
 
-  return output;
+  return output.join("");
 }
 
 function neutralizeBareUrls(value: string): string {
@@ -258,4 +259,13 @@ function findClosing(value: string, start: number, close: "]" | ")"): number | n
     if (value[index] === close) return index;
   }
   return null;
+}
+
+function stableLineFingerprint(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${value.length}:${(hash >>> 0).toString(36)}`;
 }

@@ -92,6 +92,22 @@ describe("safeMarkdown", () => {
     expect(frame).toContain("const value = 1;");
     expect(containsUnsafeTerminalControl(frame)).toBe(false);
   });
+
+  it("neutralizes large markdown inputs without leaking link destinations", () => {
+    const input = Array.from(
+      { length: 500 },
+      (_, index) =>
+        `- [label ${index}](https://example.com/${index}) and https://bare.test/${index} with safe_markdown_${index}`,
+    ).join("\n");
+
+    const output = renderSafeMarkdown(input);
+
+    expect(output).toContain("label 0");
+    expect(output).toContain("safe_markdown_499");
+    expect(output).not.toContain("](https://example.com");
+    expect(output).not.toContain("https://bare.test");
+    expect(containsUnsafeTerminalControl(output)).toBe(false);
+  });
 });
 
 function createTempDir(prefix: string): string {

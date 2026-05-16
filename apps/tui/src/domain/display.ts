@@ -10,7 +10,7 @@ import { redactText } from "../runtime/redaction.js";
 import { createSafeMarkdownStream, renderSafeMarkdown } from "../terminal/safeMarkdown.js";
 import { createSafeTextStream, sanitizeText } from "../terminal/safeTextStream.js";
 
-const TIMELINE_WINDOW = 100;
+export const CONVERSATION_TIMELINE_WINDOW = 100;
 
 export function displayText(value: string | null | undefined): string {
   return sanitizeText(redactText(sanitizeText(value ?? "")));
@@ -80,7 +80,7 @@ export type DisplayTimelineEntry =
     };
 
 export function createConversationDisplayCache(input: { readonly windowSize?: number } = {}) {
-  const windowSize = input.windowSize ?? TIMELINE_WINDOW;
+  const windowSize = input.windowSize ?? CONVERSATION_TIMELINE_WINDOW;
   const markdownByKey = new Map<
     string,
     { raw: string; stream: ReturnType<typeof createSafeMarkdownStream>; rendered: string }

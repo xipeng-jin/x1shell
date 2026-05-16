@@ -54,6 +54,7 @@ import {
 import { deriveErrorBanners, type TuiErrorBanner } from "../domain/errors.js";
 import { TUI_ACTIONS, type TuiActionId } from "../domain/keybindings.js";
 import {
+  CONVERSATION_TIMELINE_WINDOW,
   createConversationDisplayCache,
   displayProject,
   displayText,
@@ -279,7 +280,10 @@ export function App(props: {
     () => new Set(shell.selectedProjectId ? [shell.selectedProjectId] : []),
   );
   const composerText = draftProjectId ? draft : localDraft;
-  const displayCache = useMemo(() => createConversationDisplayCache({ windowSize: 40 }), []);
+  const displayCache = useMemo(
+    () => createConversationDisplayCache({ windowSize: CONVERSATION_TIMELINE_WINDOW }),
+    [],
+  );
   const timeline = useMemo(
     () => displayCache.buildTimeline(activeDetail),
     [activeDetail, displayCache],
