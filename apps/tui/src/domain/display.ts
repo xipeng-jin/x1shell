@@ -10,7 +10,7 @@ import { redactText } from "../runtime/redaction.js";
 import { createSafeMarkdownStream, renderSafeMarkdown } from "../terminal/safeMarkdown.js";
 import { createSafeTextStream, sanitizeText } from "../terminal/safeTextStream.js";
 
-const TIMELINE_WINDOW = 40;
+const TIMELINE_WINDOW = 100;
 
 export function displayText(value: string | null | undefined): string {
   return sanitizeText(redactText(sanitizeText(value ?? "")));

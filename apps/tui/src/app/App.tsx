@@ -1886,7 +1886,16 @@ function ConversationArea(props: {
     banners: props.banners,
   });
   return (
-    <scrollbox flexGrow={1} flexShrink={1} minHeight={0} paddingRight={1} focused={props.focused}>
+    <scrollbox
+      flexGrow={1}
+      flexShrink={1}
+      minHeight={0}
+      paddingRight={1}
+      focused={props.focused}
+      stickyScroll={true}
+      stickyStart="bottom"
+      verticalScrollbarOptions={{ visible: false }}
+    >
       {props.showLandingLogo && statusCards.length === 0 ? (
         <box height="100%" minHeight={8} flexDirection="column">
           <X1ShellLogo viewportColumns={props.viewportColumns} theme={props.theme} />
@@ -1915,7 +1924,7 @@ function ConversationArea(props: {
           ))
         : null}
       {props.timeline.length > 0
-        ? props.timeline.slice(-18).map((entry) =>
+        ? props.timeline.map((entry) =>
             entry.kind === "message" ? (
               entry.role === "user" ? (
                 <box

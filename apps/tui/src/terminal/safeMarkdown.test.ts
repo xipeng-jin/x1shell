@@ -70,6 +70,28 @@ describe("safeMarkdown", () => {
     expect(frame).not.toContain("\x1b]8");
     expect(containsUnsafeTerminalControl(frame)).toBe(false);
   });
+
+  it("renders common markdown blocks as visible terminal content", () => {
+    const dir = createTempDir("x1shell-safe-markdown-blocks-");
+    const framePath = join(dir, "frame.txt");
+
+    execFileSync("bun", ["run", "src/test/openTuiSafeMarkdownSmoke.tsx", framePath, "blocks"], {
+      cwd: TUI_PACKAGE_DIR,
+      stdio: "pipe",
+    });
+
+    const frame = readFileSync(framePath, "utf8");
+
+    expect(frame).toContain("Heading");
+    expect(frame).toContain("•");
+    expect(frame).toContain("bold item");
+    expect(frame).toContain("1. italic item");
+    expect(frame).toContain("quoted text");
+    expect(frame).toContain("safe_markdown.test.ts");
+    expect(frame).toContain("foo_bar_baz");
+    expect(frame).toContain("const value = 1;");
+    expect(containsUnsafeTerminalControl(frame)).toBe(false);
+  });
 });
 
 function createTempDir(prefix: string): string {
