@@ -53,6 +53,8 @@ try {
         "```",
       ].join("\n"),
     );
+  } else if (process.argv[3] === "ordered-list") {
+    await renderContent(["9. ninth item", "10. tenth item", "100. hundredth item"].join("\n"));
   } else {
     await renderContent(
       "[label](https://example.com) ![alt](https://image.test) https://bare.test",

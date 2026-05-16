@@ -137,10 +137,11 @@ function SafeMarkdownBlocks(props: { content: string; fg?: string }): React.Reac
     const list = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
     if (list) {
       const indent = Math.min(Math.floor((list[1]?.length ?? 0) / 2), 4);
+      const marker = list[2]?.match(/^\d/) ? `${list[2]} ` : "•  ";
       nodes.push(
         <box key={`list:${index}`} flexDirection="row" marginLeft={indent * 2}>
-          <box width={3} flexShrink={0}>
-            <text fg={muted}>{list[2]?.match(/^\d/) ? `${list[2]} ` : "•  "}</text>
+          <box width={Math.max(3, marker.length)} flexShrink={0}>
+            <text fg={muted}>{marker}</text>
           </box>
           <box flexGrow={1} minWidth={0}>
             <text fg={fg} wrapMode="word">

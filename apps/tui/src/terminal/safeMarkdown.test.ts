@@ -93,6 +93,27 @@ describe("safeMarkdown", () => {
     expect(containsUnsafeTerminalControl(frame)).toBe(false);
   });
 
+  it("preserves multi-digit ordered list markers in OpenTUI output", () => {
+    const dir = createTempDir("x1shell-safe-markdown-ordered-list-");
+    const framePath = join(dir, "frame.txt");
+
+    execFileSync(
+      "bun",
+      ["run", "src/test/openTuiSafeMarkdownSmoke.tsx", framePath, "ordered-list"],
+      {
+        cwd: TUI_PACKAGE_DIR,
+        stdio: "pipe",
+      },
+    );
+
+    const frame = readFileSync(framePath, "utf8");
+
+    expect(frame).toContain("9. ninth item");
+    expect(frame).toContain("10. tenth item");
+    expect(frame).toContain("100. hundredth item");
+    expect(containsUnsafeTerminalControl(frame)).toBe(false);
+  });
+
   it("neutralizes large markdown inputs without leaking link destinations", () => {
     const input = Array.from(
       { length: 500 },
