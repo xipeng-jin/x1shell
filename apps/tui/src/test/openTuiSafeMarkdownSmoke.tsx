@@ -37,6 +37,24 @@ try {
     const stream = createSafeMarkdownStream();
     await renderContent(stream.push("before [lab").snapshot);
     await renderContent(stream.push("el](https://example.com)").snapshot);
+  } else if (process.argv[3] === "blocks") {
+    await renderContent(
+      [
+        "## Heading",
+        "",
+        "- **bold** item",
+        "1. _italic_ item",
+        "> quoted text",
+        "",
+        "Keep safe_markdown.test.ts and foo_bar_baz intact.",
+        "",
+        "```ts",
+        "const value = 1;",
+        "```",
+      ].join("\n"),
+    );
+  } else if (process.argv[3] === "ordered-list") {
+    await renderContent(["9. ninth item", "10. tenth item", "100. hundredth item"].join("\n"));
   } else {
     await renderContent(
       "[label](https://example.com) ![alt](https://image.test) https://bare.test",

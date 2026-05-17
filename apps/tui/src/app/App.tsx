@@ -54,6 +54,7 @@ import {
 import { deriveErrorBanners, type TuiErrorBanner } from "../domain/errors.js";
 import { TUI_ACTIONS, type TuiActionId } from "../domain/keybindings.js";
 import {
+  CONVERSATION_TIMELINE_WINDOW,
   createConversationDisplayCache,
   displayProject,
   displayText,
@@ -279,7 +280,10 @@ export function App(props: {
     () => new Set(shell.selectedProjectId ? [shell.selectedProjectId] : []),
   );
   const composerText = draftProjectId ? draft : localDraft;
-  const displayCache = useMemo(() => createConversationDisplayCache({ windowSize: 40 }), []);
+  const displayCache = useMemo(
+    () => createConversationDisplayCache({ windowSize: CONVERSATION_TIMELINE_WINDOW }),
+    [],
+  );
   const timeline = useMemo(
     () => displayCache.buildTimeline(activeDetail),
     [activeDetail, displayCache],
@@ -1886,7 +1890,16 @@ function ConversationArea(props: {
     banners: props.banners,
   });
   return (
-    <scrollbox flexGrow={1} flexShrink={1} minHeight={0} paddingRight={1} focused={props.focused}>
+    <scrollbox
+      flexGrow={1}
+      flexShrink={1}
+      minHeight={0}
+      paddingRight={1}
+      focused={props.focused}
+      stickyScroll={true}
+      stickyStart="bottom"
+      verticalScrollbarOptions={{ visible: false }}
+    >
       {props.showLandingLogo && statusCards.length === 0 ? (
         <box height="100%" minHeight={8} flexDirection="column">
           <X1ShellLogo viewportColumns={props.viewportColumns} theme={props.theme} />
@@ -1915,7 +1928,7 @@ function ConversationArea(props: {
           ))
         : null}
       {props.timeline.length > 0
-        ? props.timeline.slice(-18).map((entry) =>
+        ? props.timeline.map((entry) =>
             entry.kind === "message" ? (
               entry.role === "user" ? (
                 <box

@@ -30,6 +30,20 @@ describe("TUI conversation display selectors", () => {
     expect(timeline[0]?.key).toBe("message:message-45");
     expect(timeline.at(-1)?.key).toBe("message:message-54");
   });
+
+  it("uses the OpenCode-aligned default display window", () => {
+    const messages = Array.from({ length: 120 }, (_, index) => ({
+      id: `message-${index}`,
+      text: `message ${index}`,
+      createdAt: new Date(Date.UTC(2026, 3, 28, 0, 0, index)).toISOString(),
+    }));
+    const cache = createConversationDisplayCache();
+    const timeline = cache.buildTimeline(threadDetail("thread-a", messages) as never);
+
+    expect(timeline).toHaveLength(100);
+    expect(timeline[0]?.key).toBe("message:message-20");
+    expect(timeline.at(-1)?.key).toBe("message:message-119");
+  });
 });
 
 function threadDetail(

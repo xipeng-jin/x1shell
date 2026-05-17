@@ -52,13 +52,23 @@ try {
   }
 
   setup.mockInput.pressEnter();
-  await new Promise((resolve) => setTimeout(resolve, 120));
   await setup.renderOnce();
-  const browseFrame = setup.captureCharFrame();
+  const browseFrame = await captureFrameContaining("workspace");
 
   await mkdir(dirname(framePath), { recursive: true });
   await writeFile(framePath, `${sourcesFrame}\n---\n${browseFrame}`, "utf8");
 } finally {
   root.unmount();
   setup.renderer.destroy();
+}
+
+async function captureFrameContaining(expected: string): Promise<string> {
+  let frame = "";
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    await setup.renderOnce();
+    frame = setup.captureCharFrame();
+    if (frame.includes(expected)) return frame;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return frame;
 }

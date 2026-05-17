@@ -70,6 +70,65 @@ describe("safeMarkdown", () => {
     expect(frame).not.toContain("\x1b]8");
     expect(containsUnsafeTerminalControl(frame)).toBe(false);
   });
+
+  it("renders common markdown blocks as visible terminal content", () => {
+    const dir = createTempDir("x1shell-safe-markdown-blocks-");
+    const framePath = join(dir, "frame.txt");
+
+    execFileSync("bun", ["run", "src/test/openTuiSafeMarkdownSmoke.tsx", framePath, "blocks"], {
+      cwd: TUI_PACKAGE_DIR,
+      stdio: "pipe",
+    });
+
+    const frame = readFileSync(framePath, "utf8");
+
+    expect(frame).toContain("Heading");
+    expect(frame).toContain("•");
+    expect(frame).toContain("bold item");
+    expect(frame).toContain("1. italic item");
+    expect(frame).toContain("quoted text");
+    expect(frame).toContain("safe_markdown.test.ts");
+    expect(frame).toContain("foo_bar_baz");
+    expect(frame).toContain("const value = 1;");
+    expect(containsUnsafeTerminalControl(frame)).toBe(false);
+  });
+
+  it("preserves multi-digit ordered list markers in OpenTUI output", () => {
+    const dir = createTempDir("x1shell-safe-markdown-ordered-list-");
+    const framePath = join(dir, "frame.txt");
+
+    execFileSync(
+      "bun",
+      ["run", "src/test/openTuiSafeMarkdownSmoke.tsx", framePath, "ordered-list"],
+      {
+        cwd: TUI_PACKAGE_DIR,
+        stdio: "pipe",
+      },
+    );
+
+    const frame = readFileSync(framePath, "utf8");
+
+    expect(frame).toContain("9. ninth item");
+    expect(frame).toContain("10. tenth item");
+    expect(frame).toContain("100. hundredth item");
+    expect(containsUnsafeTerminalControl(frame)).toBe(false);
+  });
+
+  it("neutralizes large markdown inputs without leaking link destinations", () => {
+    const input = Array.from(
+      { length: 500 },
+      (_, index) =>
+        `- [label ${index}](https://example.com/${index}) and https://bare.test/${index} with safe_markdown_${index}`,
+    ).join("\n");
+
+    const output = renderSafeMarkdown(input);
+
+    expect(output).toContain("label 0");
+    expect(output).toContain("safe_markdown_499");
+    expect(output).not.toContain("](https://example.com");
+    expect(output).not.toContain("https://bare.test");
+    expect(containsUnsafeTerminalControl(output)).toBe(false);
+  });
 });
 
 function createTempDir(prefix: string): string {
