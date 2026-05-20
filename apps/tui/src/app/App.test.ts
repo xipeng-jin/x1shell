@@ -9,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import { displayText } from "../domain/display.js";
 import { describe, expect, it } from "vitest";
+import { transformSolidOpenTuiJsx } from "../../scripts/solid-rolldown-plugin.js";
 import {
   canAppendComposerAttachment,
   canHandlePrintableShortcut,
@@ -56,6 +57,18 @@ describe("resolveCommandPaletteFrame", () => {
 });
 
 describe("App headless smoke", () => {
+  it("lowers OpenTUI Solid TSX through the build plugin", async () => {
+    const transformed = await transformSolidOpenTuiJsx(
+      'const label: string = "Hello"; export const view = <box><text>{label}</text></box>;',
+      join(TUI_PACKAGE_DIR, "src", "__plugin-test.tsx"),
+    );
+
+    expect(transformed.code).not.toContain("<box");
+    expect(transformed.code).not.toContain("<text");
+    expect(transformed.code).toContain("@opentui/solid");
+    expect(transformed.code).toContain("createElement");
+  });
+
   it(
     "builds and launches the packaged dist entry with Solid JSX lowered",
     () => {
@@ -67,11 +80,10 @@ describe("App headless smoke", () => {
         stdio: "pipe",
         timeout: DIST_SMOKE_CHILD_TIMEOUT_MS,
       });
-      execFileSync("bun", ["run", "scripts/transform-solid-dist.mjs"], {
-        cwd: TUI_PACKAGE_DIR,
-        stdio: "pipe",
-        timeout: DIST_SMOKE_CHILD_TIMEOUT_MS,
-      });
+
+      const dist = readFileSync(join(TUI_PACKAGE_DIR, "dist", "index.mjs"), "utf8");
+      expect(dist).not.toMatch(/<box|<text|<span|<strong|<em/);
+
       execFileSync(
         "bun",
         [
