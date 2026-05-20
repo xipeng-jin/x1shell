@@ -1,7 +1,6 @@
 import path from "node:path";
-import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import type React from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
+import { createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -24,6 +23,7 @@ import {
   type UploadChatAttachment,
   type VcsStatusResult,
 } from "@t3tools/contracts";
+import type { TextareaRenderable } from "@opentui/core";
 import { inferProjectTitleFromPath } from "@t3tools/shared/projectPaths";
 import type { TuiPaths } from "../cli/config.js";
 import {
@@ -198,247 +198,272 @@ export function App(props: {
   onBrowseFilesystem?: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;
   debugEntries?: readonly TuiDebugEntry[];
   onRequestExit: () => void;
-}): React.ReactNode {
+}): JSX.Element {
   const dimensions = useTerminalDimensions();
-  const [sidebarCollapsedPreference, setSidebarCollapsedPreference] = useState(false);
-  const [sidebarOverlayOpen, setSidebarOverlayOpen] = useState(false);
-  const [focusArea, setFocusArea] = useState<LandingFocusArea>("composer");
-  const layout = resolveX1ShellLandingLayout({
-    viewportColumns: dimensions.width,
-    sidebarCollapsedPreference,
-  });
-  const status = props.serverStatus ?? DEFAULT_STATUS;
-  const shell = props.shellState ?? DEFAULT_SHELL;
-  const activeThreadShell = shell.selectedThreadId
-    ? shell.threads.find((thread) => thread.id === shell.selectedThreadId)
-    : null;
-  const activeProject = shell.selectedProjectId
-    ? shell.projects.find((project) => project.id === shell.selectedProjectId)
-    : shell.projects[0];
-  const pendingProjectDraft =
-    shell.selectedProjectId && !activeProject
-      ? (shell.pendingProjectDraftByProjectId[shell.selectedProjectId] ?? null)
+  const [sidebarCollapsedPreference, setSidebarCollapsedPreference] = createSignal(false);
+  const [sidebarOverlayOpen, setSidebarOverlayOpen] = createSignal(false);
+  const [focusArea, setFocusArea] = createSignal<LandingFocusArea>("composer");
+  const layout = createMemo(() =>
+    resolveX1ShellLandingLayout({
+      viewportColumns: dimensions().width,
+      sidebarCollapsedPreference: sidebarCollapsedPreference(),
+    }),
+  );
+  const status = createMemo(() => props.serverStatus ?? DEFAULT_STATUS);
+  const shell = createMemo(() => props.shellState ?? DEFAULT_SHELL);
+  const activeThreadShell = createMemo(() => {
+    const snapshot = shell();
+    return snapshot.selectedThreadId
+      ? (snapshot.threads.find((thread) => thread.id === snapshot.selectedThreadId) ?? null)
       : null;
-  const activeDetail = shell.selectedThreadId
-    ? (props.threadDetailState?.entries[shell.selectedThreadId]?.thread ?? null)
-    : null;
-  const activeThreadHeader = activeThreadShell ?? activeDetail;
-  const draftProjectId =
-    activeProject?.id ?? activeThreadShell?.projectId ?? shell.selectedProjectId ?? null;
-  const draftProjectTitle = pendingProjectDraft
-    ? displayText(pendingProjectDraft.title)
-    : activeProject
-      ? workspaceBasename(activeProject.workspaceRoot)
-      : workspaceBasename(props.launchCwd);
-  const draft = draftProjectId ? (shell.draftByProjectId[draftProjectId] ?? "") : "";
-  const projectDraftContext = draftProjectId
-    ? (shell.draftContextByProjectId[draftProjectId] ?? {})
-    : {};
-  const draftAttachments = draftProjectId
-    ? (shell.draftAttachmentsByProjectId[draftProjectId] ?? [])
-    : [];
-  const [localDraft, setLocalDraft] = useState("");
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [visiblePanel, setVisiblePanel] = useState<
+  });
+  const activeProject = createMemo(() => {
+    const snapshot = shell();
+    return snapshot.selectedProjectId
+      ? snapshot.projects.find((project) => project.id === snapshot.selectedProjectId)
+      : snapshot.projects[0];
+  });
+  const pendingProjectDraft = createMemo(() => {
+    const snapshot = shell();
+    return snapshot.selectedProjectId && !activeProject()
+      ? (snapshot.pendingProjectDraftByProjectId[snapshot.selectedProjectId] ?? null)
+      : null;
+  });
+  const activeDetail = createMemo(() => {
+    const snapshot = shell();
+    return snapshot.selectedThreadId
+      ? (props.threadDetailState?.entries[snapshot.selectedThreadId]?.thread ?? null)
+      : null;
+  });
+  const activeThreadHeader = createMemo(() => activeThreadShell() ?? activeDetail());
+  const draftProjectId = createMemo(
+    () =>
+      activeProject()?.id ?? activeThreadShell()?.projectId ?? shell().selectedProjectId ?? null,
+  );
+  const draftProjectTitle = createMemo(() => {
+    const pending = pendingProjectDraft();
+    const project = activeProject();
+    if (pending) return displayText(pending.title);
+    return project ? workspaceBasename(project.workspaceRoot) : workspaceBasename(props.launchCwd);
+  });
+  const draft = createMemo(() => {
+    const projectId = draftProjectId();
+    return projectId ? (shell().draftByProjectId[projectId] ?? "") : "";
+  });
+  const projectDraftContext = createMemo(() => {
+    const projectId = draftProjectId();
+    return projectId ? (shell().draftContextByProjectId[projectId] ?? {}) : {};
+  });
+  const draftAttachments = createMemo(() => {
+    const projectId = draftProjectId();
+    return projectId ? (shell().draftAttachmentsByProjectId[projectId] ?? []) : [];
+  });
+  const [localDraft, setLocalDraft] = createSignal("");
+  const [submitError, setSubmitError] = createSignal<string | null>(null);
+  const [visiblePanel, setVisiblePanel] = createSignal<
     null | "palette" | "help" | "diff" | "debug" | "settings"
   >(null);
-  const [paletteMode, setPaletteMode] = useState<TuiPaletteMode>("actions");
-  const [paletteIntent, setPaletteIntent] = useState<PaletteIntent | null>(null);
-  const [paletteQuery, setPaletteQuery] = useState("");
-  const [addProjectBrowseQuery, setAddProjectBrowseQuery] = useState("");
+  const [paletteMode, setPaletteMode] = createSignal<TuiPaletteMode>("actions");
+  const [paletteIntent, setPaletteIntent] = createSignal<PaletteIntent | null>(null);
+  const [paletteQuery, setPaletteQuery] = createSignal("");
+  const [addProjectBrowseQuery, setAddProjectBrowseQuery] = createSignal("");
   const [addProjectBrowseSnapshot, setAddProjectBrowseSnapshot] =
-    useState<TuiFilesystemBrowseSnapshot | null>(null);
-  const [addProjectBrowseLoading, setAddProjectBrowseLoading] = useState(false);
-  const [addProjectBrowseError, setAddProjectBrowseError] = useState<string | null>(null);
-  const [addProjectBrowseHighlightedItemValue, setAddProjectBrowseHighlightedItemValue] = useState<
-    string | null
-  >(null);
-  const [addProjectBrowseWindowStart, setAddProjectBrowseWindowStart] = useState(0);
-  const [paletteSelectedIndex, setPaletteSelectedIndex] = useState(0);
-  const [diffState, setDiffState] = useState<{
+    createSignal<TuiFilesystemBrowseSnapshot | null>(null);
+  const [addProjectBrowseLoading, setAddProjectBrowseLoading] = createSignal(false);
+  const [addProjectBrowseError, setAddProjectBrowseError] = createSignal<string | null>(null);
+  const [addProjectBrowseHighlightedItemValue, setAddProjectBrowseHighlightedItemValue] =
+    createSignal<string | null>(null);
+  const [addProjectBrowseWindowStart, setAddProjectBrowseWindowStart] = createSignal(0);
+  const [paletteSelectedIndex, setPaletteSelectedIndex] = createSignal(0);
+  const [diffState, setDiffState] = createSignal<{
     readonly loading: boolean;
     readonly title: string;
     readonly text: string;
     readonly error: string | null;
   }>({ loading: false, title: "Diff", text: "", error: null });
-  const [diffCache, setDiffCache] = useState<Readonly<Record<string, string>>>({});
-  const diffRequestRef = useRef(0);
-  const browseRequestRef = useRef(0);
-  const activeDiffThreadIdRef = useRef<ThreadId | null>(null);
-  const [gitStatus, setGitStatus] = useState<VcsStatusResult | null>(null);
-  const [activeQuestionIndex, setActiveQuestionIndex] = useState(0);
-  const [customInputAnswers, setCustomInputAnswers] = useState<Readonly<Record<string, string>>>(
-    {},
-  );
-  const [threadControlContextById, setThreadControlContextById] = useState<
+  const [diffCache, setDiffCache] = createSignal<Readonly<Record<string, string>>>({});
+  const diffRequestRef = { current: 0 };
+  const browseRequestRef = { current: 0 };
+  const activeDiffThreadIdRef = { current: null as ThreadId | null };
+  const [gitStatus, setGitStatus] = createSignal<VcsStatusResult | null>(null);
+  const [activeQuestionIndex, setActiveQuestionIndex] = createSignal(0);
+  const [customInputAnswers, setCustomInputAnswers] = createSignal<
+    Readonly<Record<string, string>>
+  >({});
+  const [threadControlContextById, setThreadControlContextById] = createSignal<
     Readonly<Record<string, DraftControlContext>>
   >({});
-  const [selectedInputOptions, setSelectedInputOptions] = useState<
+  const [selectedInputOptions, setSelectedInputOptions] = createSignal<
     Record<string, readonly number[]>
   >({});
-  const [expandedProjectIds, setExpandedProjectIds] = useState<ReadonlySet<string>>(
-    () => new Set(shell.selectedProjectId ? [shell.selectedProjectId] : []),
+  const [expandedProjectIds, setExpandedProjectIds] = createSignal<ReadonlySet<string>>(
+    new Set<string>(shell().selectedProjectId ? [String(shell().selectedProjectId)] : []),
   );
-  const composerText = draftProjectId ? draft : localDraft;
-  const displayCache = useMemo(
-    () => createConversationDisplayCache({ windowSize: CONVERSATION_TIMELINE_WINDOW }),
-    [],
-  );
-  const timeline = useMemo(
-    () => displayCache.buildTimeline(activeDetail),
-    [activeDetail, displayCache],
-  );
-  const pendingApprovals = useMemo(
-    () => derivePendingApprovals(activeDetail?.activities ?? []),
-    [activeDetail?.activities],
-  );
-  const pendingUserInputs = useMemo(
-    () => derivePendingUserInputs(activeDetail?.activities ?? []),
-    [activeDetail?.activities],
-  );
-  const shellAllowsPendingApproval = activeThreadShell?.hasPendingApprovals ?? true;
-  const shellAllowsPendingUserInput = activeThreadShell?.hasPendingUserInput ?? true;
-  const activePendingApproval = shellAllowsPendingApproval ? (pendingApprovals[0] ?? null) : null;
-  const activePendingUserInput = shellAllowsPendingUserInput
-    ? (pendingUserInputs[0] ?? null)
-    : null;
-  const threadControlContext = activeThreadHeader?.id
-    ? (threadControlContextById[activeThreadHeader.id] ?? {})
-    : {};
-  const selectedControlContext = activeThreadHeader ? threadControlContext : projectDraftContext;
-  const defaultModelSelection: ModelSelection = createDefaultTuiModelSelection();
-  const selectedModelSelection =
-    selectedControlContext.modelSelection ??
-    activeThreadHeader?.modelSelection ??
-    activeProject?.defaultModelSelection ??
-    defaultModelSelection;
-  const selectedRuntimeMode =
-    selectedControlContext.runtimeMode ?? activeThreadHeader?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
-  const selectedInteractionMode =
-    selectedControlContext.interactionMode ??
-    activeThreadHeader?.interactionMode ??
-    DEFAULT_PROVIDER_INTERACTION_MODE;
-  const onBrowseFilesystem = props.onBrowseFilesystem;
-  const currentAddProjectBrowsePlan = useMemo(
-    () =>
-      buildTuiFilesystemBrowseRequest({
-        query: addProjectBrowseQuery,
-        platform: browsePlatformFromEnvironmentOs(status.config?.environment.platform.os ?? null),
-        activeProjectWorkspaceRoot: activeProject?.workspaceRoot ?? null,
-      }),
-    [activeProject?.workspaceRoot, addProjectBrowseQuery, status.config?.environment.platform.os],
-  );
-  const addProjectBrowseResult = filesystemBrowseResultForRequest({
-    browsePlan: currentAddProjectBrowsePlan,
-    snapshot: addProjectBrowseSnapshot,
+  const composerText = createMemo(() => (draftProjectId() ? draft() : localDraft()));
+  const displayCache = createConversationDisplayCache({
+    windowSize: CONVERSATION_TIMELINE_WINDOW,
   });
-  const addProjectBrowseEntries = addProjectBrowseResult?.entries ?? EMPTY_BROWSE_ENTRIES;
-  const selectedProvider = findProvider(status.config?.providers ?? [], selectedModelSelection);
-  const banners = deriveErrorBanners({ status, provider: selectedProvider });
-  const paletteActions = useMemo(() => filterPaletteActions(paletteQuery), [paletteQuery]);
-  const browseFilterQuery = useMemo(
-    () => browseFilterQueryFromPath(addProjectBrowseQuery),
-    [addProjectBrowseQuery],
+  const timeline = createMemo(() => displayCache.buildTimeline(activeDetail()));
+  const pendingApprovals = createMemo(() =>
+    derivePendingApprovals(activeDetail()?.activities ?? []),
   );
-  const browseFilteredEntries = useMemo(
+  const pendingUserInputs = createMemo(() =>
+    derivePendingUserInputs(activeDetail()?.activities ?? []),
+  );
+  const activePendingApproval = createMemo(() =>
+    (activeThreadShell()?.hasPendingApprovals ?? true) ? (pendingApprovals()[0] ?? null) : null,
+  );
+  const activePendingUserInput = createMemo(() =>
+    (activeThreadShell()?.hasPendingUserInput ?? true) ? (pendingUserInputs()[0] ?? null) : null,
+  );
+  const threadControlContext = createMemo(() => {
+    const thread = activeThreadHeader();
+    return thread?.id ? (threadControlContextById()[thread.id] ?? {}) : {};
+  });
+  const selectedControlContext = createMemo(() =>
+    activeThreadHeader() ? threadControlContext() : projectDraftContext(),
+  );
+  const defaultModelSelection: ModelSelection = createDefaultTuiModelSelection();
+  const selectedModelSelection = createMemo(
+    () =>
+      selectedControlContext().modelSelection ??
+      activeThreadHeader()?.modelSelection ??
+      activeProject()?.defaultModelSelection ??
+      defaultModelSelection,
+  );
+  const selectedRuntimeMode = createMemo(
+    () =>
+      selectedControlContext().runtimeMode ??
+      activeThreadHeader()?.runtimeMode ??
+      DEFAULT_RUNTIME_MODE,
+  );
+  const selectedInteractionMode = createMemo(
+    () =>
+      selectedControlContext().interactionMode ??
+      activeThreadHeader()?.interactionMode ??
+      DEFAULT_PROVIDER_INTERACTION_MODE,
+  );
+  const onBrowseFilesystem = props.onBrowseFilesystem;
+  const currentAddProjectBrowsePlan = createMemo(() =>
+    buildTuiFilesystemBrowseRequest({
+      query: addProjectBrowseQuery(),
+      platform: browsePlatformFromEnvironmentOs(status().config?.environment.platform.os ?? null),
+      activeProjectWorkspaceRoot: activeProject()?.workspaceRoot ?? null,
+    }),
+  );
+  const addProjectBrowseResult = createMemo(() =>
+    filesystemBrowseResultForRequest({
+      browsePlan: currentAddProjectBrowsePlan(),
+      snapshot: addProjectBrowseSnapshot(),
+    }),
+  );
+  const addProjectBrowseEntries = createMemo(
+    () => addProjectBrowseResult()?.entries ?? EMPTY_BROWSE_ENTRIES,
+  );
+  const selectedProvider = createMemo(() =>
+    findProvider(status().config?.providers ?? [], selectedModelSelection()),
+  );
+  const banners = createMemo(() =>
+    deriveErrorBanners({ status: status(), provider: selectedProvider() }),
+  );
+  const paletteActions = createMemo(() => filterPaletteActions(paletteQuery()));
+  const browseFilterQuery = createMemo(() => browseFilterQueryFromPath(addProjectBrowseQuery()));
+  const browseFilteredEntries = createMemo(
     () =>
       filterBrowseEntries({
-        browseEntries: addProjectBrowseEntries,
-        browseFilterQuery,
+        browseEntries: addProjectBrowseEntries(),
+        browseFilterQuery: browseFilterQuery(),
       }).filteredEntries,
-    [addProjectBrowseEntries, browseFilterQuery],
   );
-  const paletteFrame = resolveCommandPaletteFrame({
-    viewportColumns: dimensions.width,
-    viewportRows: dimensions.height,
-  });
-  const browsePaletteItems = useMemo(
-    () => browseItemsForQuery({ query: addProjectBrowseQuery, entries: browseFilteredEntries }),
-    [addProjectBrowseQuery, browseFilteredEntries],
+  const paletteFrame = createMemo(() =>
+    resolveCommandPaletteFrame({
+      viewportColumns: dimensions().width,
+      viewportRows: dimensions().height,
+    }),
   );
-  const browseWindowSize = Math.max(
-    1,
-    Math.min(
-      10,
-      paletteFrame.height - BROWSE_PALETTE_STATIC_ROW_COUNT - (addProjectBrowseError ? 1 : 0),
+  const browsePaletteItems = createMemo(() =>
+    browseItemsForQuery({ query: addProjectBrowseQuery(), entries: browseFilteredEntries() }),
+  );
+  const browseWindowSize = createMemo(() =>
+    Math.max(
+      1,
+      Math.min(
+        10,
+        paletteFrame().height - BROWSE_PALETTE_STATIC_ROW_COUNT - (addProjectBrowseError() ? 1 : 0),
+      ),
     ),
   );
-  const visibleBrowseWindowStart = useMemo(
-    () =>
-      browseWindowStartForHighlight({
-        items: browsePaletteItems,
-        highlightedItemValue: addProjectBrowseHighlightedItemValue,
-        currentStart: addProjectBrowseWindowStart,
-        windowSize: browseWindowSize,
-      }),
-    [
-      addProjectBrowseHighlightedItemValue,
-      addProjectBrowseWindowStart,
-      browsePaletteItems,
-      browseWindowSize,
-    ],
+  const visibleBrowseWindowStart = createMemo(() =>
+    browseWindowStartForHighlight({
+      items: browsePaletteItems(),
+      highlightedItemValue: addProjectBrowseHighlightedItemValue(),
+      currentStart: addProjectBrowseWindowStart(),
+      windowSize: browseWindowSize(),
+    }),
   );
-  const visibleBrowsePaletteItems = useMemo(
-    () =>
-      browsePaletteItems.slice(
-        visibleBrowseWindowStart,
-        visibleBrowseWindowStart + browseWindowSize,
-      ),
-    [browsePaletteItems, browseWindowSize, visibleBrowseWindowStart],
+  const visibleBrowsePaletteItems = createMemo(() =>
+    browsePaletteItems().slice(
+      visibleBrowseWindowStart(),
+      visibleBrowseWindowStart() + browseWindowSize(),
+    ),
   );
-  const paletteView = useMemo(() => {
-    if (paletteMode === "add-project-sources") return buildAddProjectSourcesPaletteView();
-    if (paletteMode === "add-project-browse") {
+  const paletteView = createMemo(() => {
+    if (paletteMode() === "add-project-sources") return buildAddProjectSourcesPaletteView();
+    if (paletteMode() === "add-project-browse") {
       return buildAddProjectBrowsePaletteView({
-        query: addProjectBrowseQuery,
-        items: visibleBrowsePaletteItems,
-        loading: addProjectBrowseLoading,
-        error: addProjectBrowseError,
+        query: addProjectBrowseQuery(),
+        items: visibleBrowsePaletteItems(),
+        loading: addProjectBrowseLoading(),
+        error: addProjectBrowseError(),
       });
     }
-    return buildActionPaletteView({ actions: paletteActions, query: paletteQuery });
-  }, [
-    addProjectBrowseError,
-    addProjectBrowseLoading,
-    addProjectBrowseQuery,
-    paletteActions,
-    paletteMode,
-    paletteQuery,
-    visibleBrowsePaletteItems,
-  ]);
-  activeDiffThreadIdRef.current = activeDetail?.id ?? null;
+    return buildActionPaletteView({ actions: paletteActions(), query: paletteQuery() });
+  });
 
-  useEffect(() => {
-    const selectedProjectId = shell.selectedProjectId ?? activeProject?.id;
+  createEffect(() => {
+    const selectedProjectId = shell().selectedProjectId ?? activeProject()?.id;
     if (!selectedProjectId) return;
     setExpandedProjectIds((existing) => {
       if (existing.has(selectedProjectId)) return existing;
       return new Set([...existing, selectedProjectId]);
     });
-  }, [activeProject?.id, shell.selectedProjectId]);
+  });
 
-  useEffect(() => {
+  createEffect((previousThreadId: ThreadId | null | undefined) => {
+    const threadId = activeDetail()?.id ?? null;
+    activeDiffThreadIdRef.current = threadId;
+    if (previousThreadId === undefined || previousThreadId === threadId) return threadId;
     diffRequestRef.current += 1;
     setDiffState({ loading: false, title: "Diff", text: "", error: null });
-  }, [activeDetail?.id]);
+    return threadId;
+  });
 
-  useEffect(() => {
+  createEffect((previousKey: string | undefined) => {
+    const key = `${activePendingUserInput()?.requestId ?? ""}:${activeThreadHeader()?.id ?? ""}`;
+    if (previousKey === undefined || previousKey === key) return key;
     setActiveQuestionIndex(0);
     setCustomInputAnswers({});
     setSelectedInputOptions({});
-  }, [activePendingUserInput?.requestId, activeThreadHeader?.id]);
+    return key;
+  });
 
-  useEffect(() => {
+  createEffect((previousQuery: string | undefined) => {
+    const query = paletteQuery();
+    if (previousQuery === undefined || previousQuery === query) return query;
     setPaletteSelectedIndex(0);
-  }, [paletteQuery]);
+    return query;
+  });
 
-  useEffect(() => {
+  createEffect((previousQuery: string | undefined) => {
+    const query = addProjectBrowseQuery();
+    if (previousQuery === undefined || previousQuery === query) return query;
     setAddProjectBrowseHighlightedItemValue(null);
     setAddProjectBrowseWindowStart(0);
-  }, [addProjectBrowseQuery]);
+    return query;
+  });
 
-  useEffect(() => {
-    if (paletteIntent?.kind !== "add-project") return;
+  createEffect(() => {
+    if (paletteIntent()?.kind !== "add-project") return;
     setPaletteIntent(null);
     setPaletteMode("add-project-sources");
     setPaletteQuery("");
@@ -449,20 +474,20 @@ export function App(props: {
     setAddProjectBrowseHighlightedItemValue(null);
     setAddProjectBrowseWindowStart(0);
     setPaletteSelectedIndex(0);
-  }, [paletteIntent]);
+  });
 
-  useEffect(() => {
+  createEffect(() => {
     browseRequestRef.current += 1;
     const requestId = browseRequestRef.current;
 
-    if (visiblePanel !== "palette" || paletteMode !== "add-project-browse") {
+    if (visiblePanel() !== "palette" || paletteMode() !== "add-project-browse") {
       setAddProjectBrowseSnapshot(null);
       setAddProjectBrowseLoading(false);
       setAddProjectBrowseError(null);
       return;
     }
 
-    const browsePlan = currentAddProjectBrowsePlan;
+    const browsePlan = currentAddProjectBrowsePlan();
 
     if (browsePlan.kind === "skip") {
       setAddProjectBrowseSnapshot(null);
@@ -509,17 +534,18 @@ export function App(props: {
       );
     }, 80);
 
-    return () => clearTimeout(timer);
-  }, [currentAddProjectBrowsePlan, onBrowseFilesystem, paletteMode, visiblePanel]);
+    onCleanup(() => clearTimeout(timer));
+  });
 
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") {
-      if (activeThreadHeader?.session?.status === "running" && activeThreadHeader.id) {
-        const turnId = activeThreadHeader.session.activeTurnId;
+      const activeThread = activeThreadHeader();
+      if (activeThread?.session?.status === "running" && activeThread.id) {
+        const turnId = activeThread.session.activeTurnId;
         runAsyncAction(() =>
           props.onSubmitCommand?.(
             buildThreadTurnInterrupt({
-              threadId: activeThreadHeader.id,
+              threadId: activeThread.id,
               turnId,
             }),
           ),
@@ -529,18 +555,18 @@ export function App(props: {
       }
       return;
     }
-    if (visiblePanel === "palette") {
+    if (visiblePanel() === "palette") {
       if (key.name === "escape") {
         closePalette();
         return;
       }
-      if (paletteMode === "add-project-sources") {
+      if (paletteMode() === "add-project-sources") {
         if (key.name === "up" || key.name === "down") {
           setPaletteSelectedIndex(0);
           return;
         }
         if (key.name === "return" || key.name === "enter") {
-          handlePaletteItem(paletteView.items[paletteSelectedIndex]);
+          handlePaletteItem(paletteView().items[paletteSelectedIndex()]);
           return;
         }
         if (key.ctrl && key.name === "p") {
@@ -552,7 +578,7 @@ export function App(props: {
         }
         return;
       }
-      if (paletteMode === "add-project-browse") {
+      if (paletteMode() === "add-project-browse") {
         if (key.ctrl && key.name === "p") {
           openCommandPaletteActions();
           return;
@@ -563,23 +589,23 @@ export function App(props: {
         if (key.name === "up" || key.name === "down") {
           const direction = key.name === "down" ? 1 : -1;
           const nextValue = moveBrowseHighlight({
-            items: browsePaletteItems,
-            highlightedItemValue: addProjectBrowseHighlightedItemValue,
+            items: browsePaletteItems(),
+            highlightedItemValue: addProjectBrowseHighlightedItemValue(),
             direction,
           });
           setAddProjectBrowseHighlightedItemValue(nextValue);
           setAddProjectBrowseWindowStart((currentStart) =>
             browseWindowStartForHighlight({
-              items: browsePaletteItems,
+              items: browsePaletteItems(),
               highlightedItemValue: nextValue,
               currentStart,
-              windowSize: browseWindowSize,
+              windowSize: browseWindowSize(),
             }),
           );
           return;
         }
         if (key.name === "backspace") {
-          const nextBackspaceState = applyAddProjectBrowseBackspace(addProjectBrowseQuery);
+          const nextBackspaceState = applyAddProjectBrowseBackspace(addProjectBrowseQuery());
           if (nextBackspaceState.kind === "sources") {
             setPaletteMode("add-project-sources");
             setPaletteSelectedIndex(0);
@@ -595,8 +621,8 @@ export function App(props: {
         }
         if (key.name === "return" || key.name === "enter") {
           const highlightedItem = findBrowsePaletteItem(
-            browsePaletteItems,
-            addProjectBrowseHighlightedItemValue,
+            browsePaletteItems(),
+            addProjectBrowseHighlightedItemValue(),
           );
           if (highlightedItem && !isPrimaryEnterModifier({ key })) {
             handleBrowseItem(highlightedItem);
@@ -615,13 +641,13 @@ export function App(props: {
       }
       if (key.name === "up") {
         setPaletteSelectedIndex((index) =>
-          Math.max(0, Math.min(index - 1, paletteActions.length - 1)),
+          Math.max(0, Math.min(index - 1, paletteActions().length - 1)),
         );
         return;
       }
       if (key.name === "down") {
         setPaletteSelectedIndex((index) =>
-          Math.max(0, Math.min(index + 1, paletteActions.length - 1)),
+          Math.max(0, Math.min(index + 1, paletteActions().length - 1)),
         );
         return;
       }
@@ -630,7 +656,7 @@ export function App(props: {
         return;
       }
       if (key.name === "return" || key.name === "enter") {
-        const action = paletteActions[paletteSelectedIndex];
+        const action = paletteActions()[paletteSelectedIndex()];
         if (action) {
           setVisiblePanel(null);
           setPaletteQuery("");
@@ -643,15 +669,17 @@ export function App(props: {
         return;
       }
     }
-    if (activePendingUserInput && activeThreadHeader?.id) {
+    const pendingInput = activePendingUserInput();
+    const inputThread = activeThreadHeader();
+    if (pendingInput && inputThread?.id) {
       const boundedQuestionIndex = Math.min(
-        activeQuestionIndex,
-        Math.max(activePendingUserInput.questions.length - 1, 0),
+        activeQuestionIndex(),
+        Math.max(pendingInput.questions.length - 1, 0),
       );
-      const activeQuestion = activePendingUserInput.questions[boundedQuestionIndex];
+      const activeQuestion = pendingInput.questions[boundedQuestionIndex];
       const activeQuestionId = activeQuestion?.id;
       const activeCustomInputAnswer = activeQuestionId
-        ? (customInputAnswers[activeQuestionId] ?? "")
+        ? (customInputAnswers()[activeQuestionId] ?? "")
         : "";
       if (key.name === "left") {
         setActiveQuestionIndex(Math.max(0, boundedQuestionIndex - 1));
@@ -659,7 +687,7 @@ export function App(props: {
       }
       if (key.name === "right") {
         setActiveQuestionIndex(
-          Math.min(activePendingUserInput.questions.length - 1, boundedQuestionIndex + 1),
+          Math.min(pendingInput.questions.length - 1, boundedQuestionIndex + 1),
         );
         return;
       }
@@ -677,15 +705,15 @@ export function App(props: {
       }
       if (key.name === "return" || key.name === "enter") {
         const answers = buildUserInputAnswers({
-          pending: activePendingUserInput,
-          selectedOptions: selectedInputOptions,
-          customAnswers: customInputAnswers,
+          pending: pendingInput,
+          selectedOptions: selectedInputOptions(),
+          customAnswers: customInputAnswers(),
         });
         runAsyncAction(() =>
           props.onSubmitCommand?.(
             buildThreadUserInputResponse({
-              threadId: activeThreadHeader.id,
-              requestId: activePendingUserInput.requestId,
+              threadId: inputThread.id,
+              requestId: pendingInput.requestId,
               answers,
             }),
           ),
@@ -709,9 +737,13 @@ export function App(props: {
     }
     if (
       key.name === "?" &&
-      canHandlePrintableShortcut({ composerText, visiblePanel, keyName: key.name })
+      canHandlePrintableShortcut({
+        composerText: composerText(),
+        visiblePanel: visiblePanel(),
+        keyName: key.name,
+      })
     ) {
-      setVisiblePanel(visiblePanel === "help" ? null : "help");
+      setVisiblePanel(visiblePanel() === "help" ? null : "help");
       return;
     }
     if (key.ctrl && key.name === "p") {
@@ -719,7 +751,7 @@ export function App(props: {
       return;
     }
     if (key.ctrl && key.name === "b") {
-      if (layout.sidebarForcedCollapsed) {
+      if (layout().sidebarForcedCollapsed) {
         setSidebarOverlayOpen((current) => !current);
       } else {
         setSidebarCollapsedPreference((current) => !current);
@@ -727,78 +759,92 @@ export function App(props: {
       return;
     }
     if (key.ctrl && key.name === "d") {
-      setVisiblePanel(visiblePanel === "debug" ? null : "debug");
+      setVisiblePanel(visiblePanel() === "debug" ? null : "debug");
       setFocusArea("timeline");
       return;
     }
     if (key.name === "tab") {
-      setFocusArea((current) => nextFocusArea(current, layout.showSidebar || sidebarOverlayOpen));
+      setFocusArea((current) =>
+        nextFocusArea(current, layout().showSidebar || sidebarOverlayOpen()),
+      );
       return;
     }
-    if (composerText.length === 0 && focusArea === "projects" && key.name === "up") {
+    if (composerText().length === 0 && focusArea() === "projects" && key.name === "up") {
       selectAdjacentProject(-1);
       return;
     }
-    if (composerText.length === 0 && focusArea === "projects" && key.name === "down") {
+    if (composerText().length === 0 && focusArea() === "projects" && key.name === "down") {
       selectAdjacentProject(1);
       return;
     }
-    if (composerText.length === 0 && focusArea === "threads" && key.name === "up") {
+    if (composerText().length === 0 && focusArea() === "threads" && key.name === "up") {
       selectAdjacentVisibleThread(-1);
       return;
     }
-    if (composerText.length === 0 && focusArea === "threads" && key.name === "down") {
+    if (composerText().length === 0 && focusArea() === "threads" && key.name === "down") {
       selectAdjacentVisibleThread(1);
       return;
     }
     if (
       key.name === "," &&
-      canHandlePrintableShortcut({ composerText, visiblePanel, keyName: key.name })
+      canHandlePrintableShortcut({
+        composerText: composerText(),
+        visiblePanel: visiblePanel(),
+        keyName: key.name,
+      })
     ) {
-      setVisiblePanel(visiblePanel === "settings" ? null : "settings");
+      setVisiblePanel(visiblePanel() === "settings" ? null : "settings");
       setFocusArea("timeline");
       return;
     }
     if (
       key.name === "d" &&
-      canHandlePrintableShortcut({ composerText, visiblePanel, keyName: key.name })
+      canHandlePrintableShortcut({
+        composerText: composerText(),
+        visiblePanel: visiblePanel(),
+        keyName: key.name,
+      })
     ) {
-      setVisiblePanel(visiblePanel === "diff" ? null : "diff");
+      setVisiblePanel(visiblePanel() === "diff" ? null : "diff");
       setFocusArea("timeline");
       return;
     }
     if (
-      canHandlePrintableShortcut({ composerText, visiblePanel, keyName: key.name }) &&
+      canHandlePrintableShortcut({
+        composerText: composerText(),
+        visiblePanel: visiblePanel(),
+        keyName: key.name,
+      }) &&
       (key.name === "t" || key.name === "f")
     ) {
       void loadDiff(key.name === "t" ? "turn" : "full");
       return;
     }
-    if (composerText.length === 0 && key.name === "R") {
+    if (composerText().length === 0 && key.name === "R") {
       runAsyncAction(() => performAction("connection.reconnect"));
       return;
     }
-    if (composerText.length === 0 && key.name === "p") {
+    if (composerText().length === 0 && key.name === "p") {
       runAsyncAction(() => performAction("providers.refresh"));
       return;
     }
-    if (composerText.length === 0 && key.name === "g") {
+    if (composerText().length === 0 && key.name === "g") {
       runAsyncAction(() => performAction("vcs.refresh"));
       return;
     }
-    if (composerText.length === 0 && key.name === "m") {
+    if (composerText().length === 0 && key.name === "m") {
       runAsyncAction(() => performAction("model.next"));
       return;
     }
-    if (composerText.length === 0 && key.name === "r") {
+    if (composerText().length === 0 && key.name === "r") {
       runAsyncAction(() => performAction("runtime.next"));
       return;
     }
-    if (composerText.length === 0 && key.name === "i") {
+    if (composerText().length === 0 && key.name === "i") {
       runAsyncAction(() => performAction("interaction.next"));
       return;
     }
-    if (activePendingApproval && activeThreadHeader?.id && composerText.length === 0) {
+    if (activePendingApproval() && activeThreadHeader()?.id && composerText().length === 0) {
       const decision =
         key.name === "y"
           ? "accept"
@@ -810,11 +856,13 @@ export function App(props: {
                 ? "cancel"
                 : null;
       if (decision) {
+        const thread = activeThreadHeader();
+        if (!thread?.id) return;
         runAsyncAction(() =>
           props.onSubmitCommand?.(
             buildThreadApprovalResponse({
-              threadId: activeThreadHeader.id,
-              requestId: activePendingApproval.requestId,
+              threadId: thread.id,
+              requestId: activePendingApproval()!.requestId,
               decision,
             }),
           ),
@@ -822,15 +870,15 @@ export function App(props: {
         return;
       }
     }
-    if (key.name === "q" && composerText.length === 0) {
+    if (key.name === "q" && composerText().length === 0) {
       runAsyncAction(() => performAction("turn.interrupt-or-exit"));
       return;
     }
-    if (composerText.length === 0 && key.name === "up") {
+    if (composerText().length === 0 && key.name === "up") {
       runAsyncAction(() => performAction("thread.previous"));
       return;
     }
-    if (composerText.length === 0 && key.name === "down") {
+    if (composerText().length === 0 && key.name === "down") {
       runAsyncAction(() => performAction("thread.next"));
       return;
     }
@@ -838,16 +886,20 @@ export function App(props: {
       runAsyncAction(() => performAction("thread.new"));
       return;
     }
-    if (composerText.length === 0 && key.name === "s" && canStopThreadSession(activeThreadHeader)) {
+    if (
+      composerText().length === 0 &&
+      key.name === "s" &&
+      canStopThreadSession(activeThreadHeader())
+    ) {
       runAsyncAction(() => performAction("thread.stop"));
       return;
     }
-    if (composerText.length === 0 && key.name === "a" && activeThreadHeader?.id) {
+    if (composerText().length === 0 && key.name === "a" && activeThreadHeader()?.id) {
       runAsyncAction(() => performAction("thread.archive-toggle"));
       return;
     }
     if (key.name === "backspace") {
-      updateDraft(composerText.slice(0, -1));
+      updateDraft(composerText().slice(0, -1));
       return;
     }
     if (key.name === "return" || key.name === "enter") {
@@ -855,28 +907,30 @@ export function App(props: {
       return;
     }
     if (isPlainTextSequence(key)) {
-      const image = parseComposerAttachmentInput(key.sequence, draftProjectId);
-      if (image && draftProjectId) {
-        if (!canAppendComposerAttachment(draftAttachments)) {
+      const image = parseComposerAttachmentInput(key.sequence, draftProjectId());
+      if (image && draftProjectId()) {
+        if (!canAppendComposerAttachment(draftAttachments())) {
           setSubmitError(composerAttachmentLimitMessage());
           return;
         }
-        setDraftAttachments([...draftAttachments, image.attachment]);
+        setDraftAttachments([...draftAttachments(), image.attachment]);
         setSubmitError(`Attached ${displayText(image.sourceLabel)}`);
         return;
       }
-      updateDraft(composerText + key.sequence);
+      updateDraft(composerText() + key.sequence);
     }
   });
 
   function updateDraft(next: string) {
     setSubmitError(null);
-    if (draftProjectId) props.onDraftChange?.(draftProjectId, next);
+    const projectId = draftProjectId();
+    if (projectId) props.onDraftChange?.(projectId, next);
     else setLocalDraft(next);
   }
 
   function setProjectDraftContext(context: DraftControlContext) {
-    if (draftProjectId) props.onDraftContextChange?.(draftProjectId, context);
+    const projectId = draftProjectId();
+    if (projectId) props.onDraftContextChange?.(projectId, context);
   }
 
   function setThreadControlContext(threadId: ThreadId, context: DraftControlContext) {
@@ -884,7 +938,8 @@ export function App(props: {
   }
 
   function setDraftAttachments(attachments: readonly UploadChatAttachment[]) {
-    if (draftProjectId) props.onDraftAttachmentsChange?.(draftProjectId, attachments);
+    const projectId = draftProjectId();
+    if (projectId) props.onDraftAttachmentsChange?.(projectId, attachments);
   }
 
   function runAsyncAction(
@@ -944,7 +999,7 @@ export function App(props: {
       setPaletteMode("add-project-browse");
       setAddProjectBrowseQuery(
         initialAddProjectBrowseQuery({
-          addProjectBaseDirectory: status.config?.settings.addProjectBaseDirectory ?? null,
+          addProjectBaseDirectory: status().config?.settings.addProjectBaseDirectory ?? null,
         }),
       );
       setAddProjectBrowseSnapshot(null);
@@ -971,7 +1026,7 @@ export function App(props: {
   }
 
   function handleBrowseItem(item: TuiBrowsePaletteItem): void {
-    const nextQuery = executeBrowseItem({ query: addProjectBrowseQuery, item });
+    const nextQuery = executeBrowseItem({ query: addProjectBrowseQuery(), item });
     if (nextQuery === null) return;
     setAddProjectBrowseQuery(nextQuery);
     setAddProjectBrowseSnapshot(null);
@@ -982,7 +1037,7 @@ export function App(props: {
   }
 
   async function submitAddProjectBrowsePath(): Promise<void> {
-    const browsePlan = currentAddProjectBrowsePlan;
+    const browsePlan = currentAddProjectBrowsePlan();
     if (browsePlan.kind === "skip") return;
     if (browsePlan.kind === "error") {
       setAddProjectBrowseError(displayText(browsePlan.message));
@@ -990,15 +1045,15 @@ export function App(props: {
     }
 
     const resolvedPath = resolveBrowseSubmitPath({
-      query: addProjectBrowseQuery,
-      browseResult: addProjectBrowseResult,
-      filteredEntries: browseFilteredEntries,
-      currentProjectWorkspaceRoot: activeProject?.workspaceRoot ?? null,
+      query: addProjectBrowseQuery(),
+      browseResult: addProjectBrowseResult(),
+      filteredEntries: browseFilteredEntries(),
+      currentProjectWorkspaceRoot: activeProject()?.workspaceRoot ?? null,
     });
     const submitPath = resolveAddProjectSubmitPath({
       rawPath: resolvedPath,
-      platform: browsePlatformFromEnvironmentOs(status.config?.environment.platform.os ?? null),
-      currentProjectWorkspaceRoot: activeProject?.workspaceRoot ?? null,
+      platform: browsePlatformFromEnvironmentOs(status().config?.environment.platform.os ?? null),
+      currentProjectWorkspaceRoot: activeProject()?.workspaceRoot ?? null,
     });
     if (submitPath.kind === "empty") return;
     if (submitPath.kind === "error") {
@@ -1007,9 +1062,9 @@ export function App(props: {
     }
 
     const cwd = submitPath.cwd;
-    const existingProject = findTuiProjectByPath(shell.projects, cwd);
+    const existingProject = findTuiProjectByPath(shell().projects, cwd);
     if (existingProject) {
-      const latestThread = getLatestVisibleThreadForProject(shell.threads, existingProject.id);
+      const latestThread = getLatestVisibleThreadForProject(shell().threads, existingProject.id);
       if (latestThread) {
         props.onSelectThread?.(latestThread.id);
       } else {
@@ -1036,10 +1091,10 @@ export function App(props: {
   }
 
   function selectAdjacentProject(direction: 1 | -1) {
-    const projects = sortedProjects(shell.projects);
+    const projects = sortedProjects(shell().projects);
     if (projects.length === 0) return;
-    const currentIndex = shell.selectedProjectId
-      ? projects.findIndex((project) => project.id === shell.selectedProjectId)
+    const currentIndex = shell().selectedProjectId
+      ? projects.findIndex((project) => project.id === shell().selectedProjectId)
       : -1;
     const nextIndex =
       currentIndex < 0 ? 0 : (currentIndex + direction + projects.length) % projects.length;
@@ -1049,10 +1104,10 @@ export function App(props: {
   }
 
   function selectAdjacentVisibleThread(direction: 1 | -1) {
-    const threads = sortedVisibleThreads(shell);
+    const threads = sortedVisibleThreads(shell());
     if (threads.length === 0) return;
-    const currentIndex = shell.selectedThreadId
-      ? threads.findIndex((thread) => thread.id === shell.selectedThreadId)
+    const currentIndex = shell().selectedThreadId
+      ? threads.findIndex((thread) => thread.id === shell().selectedThreadId)
       : -1;
     const nextIndex =
       currentIndex < 0 ? 0 : (currentIndex + direction + threads.length) % threads.length;
@@ -1062,38 +1117,41 @@ export function App(props: {
   }
 
   async function submit() {
-    const text = composerText.trim();
+    const text = composerText().trim();
     if (!text || !props.onSubmitCommand) return;
     try {
-      if (activeThreadShell) {
+      const thread = activeThreadShell();
+      const project = activeProject();
+      if (thread) {
         const commandInput = {
-          thread: activeThreadShell,
+          thread,
           text,
-          attachments: draftAttachments,
-          runtimeMode: selectedRuntimeMode,
-          interactionMode: selectedInteractionMode,
-          ...(selectedModelSelection ? { modelSelection: selectedModelSelection } : {}),
+          attachments: draftAttachments(),
+          runtimeMode: selectedRuntimeMode(),
+          interactionMode: selectedInteractionMode(),
+          ...(selectedModelSelection() ? { modelSelection: selectedModelSelection() } : {}),
         };
         await props.onSubmitCommand(buildExistingThreadTurnStart(commandInput));
-      } else if (activeProject) {
+      } else if (project) {
         const command = buildNewThreadTurnStart({
-          project: activeProject,
+          project,
           text,
-          attachments: draftAttachments,
-          runtimeMode: selectedRuntimeMode,
-          interactionMode: selectedInteractionMode,
-          ...(selectedModelSelection ? { modelSelection: selectedModelSelection } : {}),
+          attachments: draftAttachments(),
+          runtimeMode: selectedRuntimeMode(),
+          interactionMode: selectedInteractionMode(),
+          ...(selectedModelSelection() ? { modelSelection: selectedModelSelection() } : {}),
         });
         await props.onSubmitCommand(command);
-        props.onPromoteProjectDraft?.(activeProject.id, command.threadId);
-      } else if (pendingProjectDraft) {
+        props.onPromoteProjectDraft?.(project.id, command.threadId);
+      } else if (pendingProjectDraft()) {
         setSubmitError(displayText("Project is still loading."));
         return;
       } else {
         return;
       }
-      if (draftProjectId) props.onDraftChange?.(draftProjectId, "");
-      if (draftProjectId) setDraftAttachments([]);
+      const projectId = draftProjectId();
+      if (projectId) props.onDraftChange?.(projectId, "");
+      if (projectId) setDraftAttachments([]);
       else setLocalDraft("");
     } catch (error) {
       setSubmitError(displayText(String(error)));
@@ -1106,7 +1164,7 @@ export function App(props: {
         openCommandPaletteActions();
         return;
       case "help.toggle":
-        setVisiblePanel(visiblePanel === "help" ? null : "help");
+        setVisiblePanel(visiblePanel() === "help" ? null : "help");
         return;
       case "thread.new":
         props.onNewThread?.();
@@ -1114,41 +1172,45 @@ export function App(props: {
       case "message.send":
         await submit();
         return;
-      case "turn.interrupt-or-exit":
-        if (activeThreadHeader?.session?.status === "running" && activeThreadHeader.id) {
-          await props.onSubmitCommand?.(
-            buildThreadTurnInterrupt({
-              threadId: activeThreadHeader.id,
-              turnId: activeThreadHeader.session.activeTurnId,
-            }),
-          );
-        } else {
+      case "turn.interrupt-or-exit": {
+        const thread = activeThreadHeader();
+        if (thread?.session?.status !== "running" || !thread.id) {
           props.onRequestExit();
+          return;
         }
+        await props.onSubmitCommand?.(
+          buildThreadTurnInterrupt({
+            threadId: thread.id,
+            turnId: thread.session.activeTurnId,
+          }),
+        );
         return;
+      }
       case "thread.next":
         props.onSelectNextThread?.(1);
         return;
       case "thread.previous":
         props.onSelectNextThread?.(-1);
         return;
-      case "thread.archive-toggle":
-        if (!activeThreadHeader?.id) return;
-        if (activeThreadHeader.archivedAt) {
-          await props.onSubmitCommand?.(buildThreadUnarchive({ threadId: activeThreadHeader.id }));
-        } else if (canArchiveThread(activeThreadHeader)) {
-          await props.onSubmitCommand?.(buildThreadArchive({ threadId: activeThreadHeader.id }));
+      case "thread.archive-toggle": {
+        const thread = activeThreadHeader();
+        if (!thread?.id) return;
+        if (thread.archivedAt) {
+          await props.onSubmitCommand?.(buildThreadUnarchive({ threadId: thread.id }));
+        } else if (canArchiveThread(thread)) {
+          await props.onSubmitCommand?.(buildThreadArchive({ threadId: thread.id }));
         }
         return;
-      case "thread.stop":
-        if (activeThreadHeader?.id && canStopThreadSession(activeThreadHeader)) {
-          await props.onSubmitCommand?.(
-            buildThreadSessionStop({ threadId: activeThreadHeader.id }),
-          );
+      }
+      case "thread.stop": {
+        const thread = activeThreadHeader();
+        if (thread?.id && canStopThreadSession(thread)) {
+          await props.onSubmitCommand?.(buildThreadSessionStop({ threadId: thread.id }));
         }
         return;
+      }
       case "diff.toggle":
-        setVisiblePanel(visiblePanel === "diff" ? null : "diff");
+        setVisiblePanel(visiblePanel() === "diff" ? null : "diff");
         return;
       case "diff.turn":
         await loadDiff("turn");
@@ -1157,19 +1219,19 @@ export function App(props: {
         await loadDiff("full");
         return;
       case "debug.toggle":
-        setVisiblePanel(visiblePanel === "debug" ? null : "debug");
+        setVisiblePanel(visiblePanel() === "debug" ? null : "debug");
         return;
       case "settings.toggle":
-        setVisiblePanel(visiblePanel === "settings" ? null : "settings");
+        setVisiblePanel(visiblePanel() === "settings" ? null : "settings");
         return;
       case "model.next":
         await cycleModel();
         return;
       case "runtime.next":
-        await setRuntimeMode(nextRuntimeMode(selectedRuntimeMode));
+        await setRuntimeMode(nextRuntimeMode(selectedRuntimeMode()));
         return;
       case "interaction.next":
-        await setInteractionMode(selectedInteractionMode === "default" ? "plan" : "default");
+        await setInteractionMode(selectedInteractionMode() === "default" ? "plan" : "default");
         return;
       case "connection.reconnect":
         await props.onReconnect?.();
@@ -1184,9 +1246,10 @@ export function App(props: {
   }
 
   async function loadDiff(mode: TuiDiffMode) {
-    if (!activeDetail) return;
-    const turnInput = mode === "turn" ? buildTurnDiffInput(activeDetail) : null;
-    const fullInput = mode === "full" ? buildFullThreadDiffInput(activeDetail) : null;
+    const detail = activeDetail();
+    if (!detail) return;
+    const turnInput = mode === "turn" ? buildTurnDiffInput(detail) : null;
+    const fullInput = mode === "full" ? buildFullThreadDiffInput(detail) : null;
     const input = turnInput ?? fullInput;
     if (!input) {
       setDiffState({
@@ -1200,14 +1263,14 @@ export function App(props: {
     const key = diffCacheKey(
       turnInput
         ? {
-            threadId: activeDetail.id,
+            threadId: detail.id,
             mode,
             fromTurnCount: turnInput.fromTurnCount,
             toTurnCount: turnInput.toTurnCount,
           }
-        : { threadId: activeDetail.id, mode, toTurnCount: fullInput!.toTurnCount },
+        : { threadId: detail.id, mode, toTurnCount: fullInput!.toTurnCount },
     );
-    const cached = diffCache[key];
+    const cached = diffCache()[key];
     if (cached) {
       setDiffState({ loading: false, title: `${mode} diff`, text: cached, error: null });
       setVisiblePanel("diff");
@@ -1216,7 +1279,7 @@ export function App(props: {
     setVisiblePanel("diff");
     setDiffState({ loading: true, title: `${mode} diff`, text: "", error: null });
     const requestId = (diffRequestRef.current += 1);
-    const requestThreadId = activeDetail.id;
+    const requestThreadId = detail.id;
     try {
       const result = turnInput
         ? await props.onGetTurnDiff?.(turnInput)
@@ -1248,7 +1311,7 @@ export function App(props: {
 
   async function refreshVcs() {
     const cwd =
-      activeThreadHeader?.worktreePath ?? activeProject?.workspaceRoot ?? status.config?.cwd;
+      activeThreadHeader()?.worktreePath ?? activeProject()?.workspaceRoot ?? status().config?.cwd;
     if (!cwd) return;
     try {
       const next = await props.onRefreshVcsStatus?.(cwd);
@@ -1259,8 +1322,9 @@ export function App(props: {
   }
 
   async function cycleModel() {
-    if (!draftProjectId || !status.config?.providers.length) return;
-    const models = deriveProviderInstanceEntries(status.config.providers).flatMap((entry) =>
+    if (!draftProjectId() || !status().config?.providers.length) return;
+    const providers = status().config?.providers ?? [];
+    const models = deriveProviderInstanceEntries(providers).flatMap((entry) =>
       providerSelectable(entry.provider)
         ? entry.models.map((model) => ({
             instanceId: entry.instanceId,
@@ -1271,56 +1335,60 @@ export function App(props: {
     if (models.length === 0) return;
     const index = models.findIndex(
       (entry) =>
-        entry.instanceId === selectedModelSelection?.instanceId &&
-        entry.model === selectedModelSelection?.model,
+        entry.instanceId === selectedModelSelection()?.instanceId &&
+        entry.model === selectedModelSelection()?.model,
     );
     const next = models[(index + 1 + models.length) % models.length]!;
-    if (activeThreadHeader?.id) {
-      setThreadControlContext(activeThreadHeader.id, {
-        ...threadControlContext,
+    const thread = activeThreadHeader();
+    if (thread?.id) {
+      setThreadControlContext(thread.id, {
+        ...threadControlContext(),
         modelSelection: next as ModelSelection,
       });
       await props.onSubmitCommand?.(
         buildThreadMetaUpdate({
-          threadId: activeThreadHeader.id,
+          threadId: thread.id,
           modelSelection: next as ModelSelection,
         }),
       );
     } else {
-      setProjectDraftContext({ ...projectDraftContext, modelSelection: next as ModelSelection });
+      setProjectDraftContext({ ...projectDraftContext(), modelSelection: next as ModelSelection });
     }
   }
 
   async function setRuntimeMode(runtimeMode: RuntimeMode) {
-    if (!draftProjectId) return;
-    if (activeThreadHeader?.id) {
-      setThreadControlContext(activeThreadHeader.id, { ...threadControlContext, runtimeMode });
+    if (!draftProjectId()) return;
+    const thread = activeThreadHeader();
+    if (thread?.id) {
+      setThreadControlContext(thread.id, { ...threadControlContext(), runtimeMode });
       await props.onSubmitCommand?.(
-        buildThreadRuntimeModeSet({ threadId: activeThreadHeader.id, runtimeMode }),
+        buildThreadRuntimeModeSet({ threadId: thread.id, runtimeMode }),
       );
     } else {
-      setProjectDraftContext({ ...projectDraftContext, runtimeMode });
+      setProjectDraftContext({ ...projectDraftContext(), runtimeMode });
     }
   }
 
   async function setInteractionMode(interactionMode: ProviderInteractionMode) {
-    if (!draftProjectId) return;
-    if (activeThreadHeader?.id) {
-      setThreadControlContext(activeThreadHeader.id, {
-        ...threadControlContext,
+    if (!draftProjectId()) return;
+    const thread = activeThreadHeader();
+    if (thread?.id) {
+      setThreadControlContext(thread.id, {
+        ...threadControlContext(),
         interactionMode,
       });
       await props.onSubmitCommand?.(
-        buildThreadInteractionModeSet({ threadId: activeThreadHeader.id, interactionMode }),
+        buildThreadInteractionModeSet({ threadId: thread.id, interactionMode }),
       );
     } else {
-      setProjectDraftContext({ ...projectDraftContext, interactionMode });
+      setProjectDraftContext({ ...projectDraftContext(), interactionMode });
     }
   }
 
   function toggleUserInputOption(index: number, questionId: string | undefined) {
-    if (!questionId || !activePendingUserInput) return;
-    const question = activePendingUserInput.questions.find((entry) => entry.id === questionId);
+    const pending = activePendingUserInput();
+    if (!questionId || !pending) return;
+    const question = pending.questions.find((entry) => entry.id === questionId);
     if (!question || !question.options[index]) return;
     setSelectedInputOptions((existing) => {
       const current = existing[questionId] ?? [];
@@ -1341,7 +1409,7 @@ export function App(props: {
       backgroundColor={props.theme.palette.canvas}
       position="relative"
     >
-      {sidebarOverlayOpen ? (
+      {sidebarOverlayOpen() ? (
         <box
           position="absolute"
           left={0}
@@ -1353,14 +1421,14 @@ export function App(props: {
           onMouseDown={() => setSidebarOverlayOpen(false)}
         />
       ) : null}
-      {layout.showSidebar || sidebarOverlayOpen ? (
+      {layout().showSidebar || sidebarOverlayOpen() ? (
         <Sidebar
-          shell={shell}
-          connection={status.connection}
-          layout={sidebarOverlayOpen ? overlaySidebarLayout(layout) : layout}
-          overlay={sidebarOverlayOpen}
-          focusArea={focusArea}
-          expandedProjectIds={expandedProjectIds}
+          shell={shell()}
+          connection={status().connection}
+          layout={sidebarOverlayOpen() ? overlaySidebarLayout(layout()) : layout()}
+          overlay={sidebarOverlayOpen()}
+          focusArea={focusArea()}
+          expandedProjectIds={expandedProjectIds()}
           onToggleProject={(projectId) => {
             setFocusArea("projects");
             setExpandedProjectIds((existing) => {
@@ -1370,7 +1438,7 @@ export function App(props: {
               return next;
             });
             props.onSelectProject?.(projectId);
-            if (sidebarOverlayOpen) setSidebarOverlayOpen(false);
+            if (sidebarOverlayOpen()) setSidebarOverlayOpen(false);
           }}
           onCreateProjectDraft={(projectId) => {
             setFocusArea("composer");
@@ -1398,14 +1466,14 @@ export function App(props: {
       ) : null}
       <box flexGrow={1} flexDirection="column" backgroundColor={props.theme.palette.main}>
         <MainHeader
-          thread={activeThreadHeader}
-          projectTitle={draftProjectTitle}
-          showProjectBadge={layout.showHeaderProjectBadge}
-          showSidebarToggle={layout.showSidebarToggle}
-          showSidebar={layout.showSidebar || sidebarOverlayOpen}
+          thread={activeThreadHeader()}
+          projectTitle={draftProjectTitle()}
+          showProjectBadge={layout().showHeaderProjectBadge}
+          showSidebarToggle={layout().showSidebarToggle}
+          showSidebar={layout().showSidebar || sidebarOverlayOpen()}
           onToggleSidebar={() => {
             setFocusArea("projects");
-            if (layout.sidebarForcedCollapsed) {
+            if (layout().sidebarForcedCollapsed) {
               setSidebarOverlayOpen((current) => !current);
             } else {
               setSidebarCollapsedPreference((current) => !current);
@@ -1413,10 +1481,10 @@ export function App(props: {
           }}
           onToggleDiff={() => runAsyncAction(() => performAction("diff.toggle"))}
           onRefreshVcs={() => runAsyncAction(() => performAction("vcs.refresh"))}
-          viewportColumns={dimensions.width}
-          gitStatus={gitStatus}
-          diffActive={visiblePanel === "diff"}
-          focusArea={focusArea}
+          viewportColumns={dimensions().width}
+          gitStatus={gitStatus()}
+          diffActive={visiblePanel() === "diff"}
+          focusArea={focusArea()}
           onFocusControls={() => setFocusArea("controls")}
           theme={props.theme}
         />
@@ -1428,82 +1496,84 @@ export function App(props: {
           flexDirection="column"
           onMouseDown={() => setFocusArea("timeline")}
         >
-          {visiblePanel === "palette" ? null : visiblePanel === "help" ? (
+          {visiblePanel() === "palette" ? null : visiblePanel() === "help" ? (
             <KeyboardHelp theme={props.theme} />
-          ) : visiblePanel === "diff" ? (
+          ) : visiblePanel() === "diff" ? (
             <DiffPanel
-              title={diffState.title}
-              text={diffState.text}
-              loading={diffState.loading}
-              error={diffState.error}
+              title={diffState().title}
+              text={diffState().text}
+              loading={diffState().loading}
+              error={diffState().error}
               theme={props.theme}
             />
-          ) : visiblePanel === "debug" ? (
+          ) : visiblePanel() === "debug" ? (
             <DebugPanel entries={props.debugEntries ?? []} theme={props.theme} />
-          ) : visiblePanel === "settings" ? (
-            <SettingsPanel config={status.config} theme={props.theme} />
+          ) : visiblePanel() === "settings" ? (
+            <SettingsPanel config={status().config} theme={props.theme} />
           ) : (
             <ConversationArea
-              timeline={timeline}
+              timeline={timeline()}
               viewportColumns={
-                dimensions.width - (layout.showSidebar ? layout.sidebarWidth + 1 : 0) - 4
+                dimensions().width - (layout().showSidebar ? layout().sidebarWidth + 1 : 0) - 4
               }
-              connection={status.connection}
-              banners={banners}
-              showLandingLogo={Boolean(!activeThreadHeader && timeline.length === 0)}
-              focused={focusArea === "timeline"}
+              connection={status().connection}
+              banners={banners()}
+              showLandingLogo={Boolean(!activeThreadHeader() && timeline().length === 0)}
+              focused={focusArea() === "timeline"}
               theme={props.theme}
             />
           )}
         </box>
         <ComposerPanel
-          composerText={composerText}
-          submitError={submitError}
-          provider={selectedProvider}
-          modelSelection={selectedModelSelection}
-          runtimeMode={selectedRuntimeMode}
-          interactionMode={selectedInteractionMode}
-          attachmentCount={draftAttachments.length}
-          branch={activeThreadHeader?.branch ?? gitStatus?.refName ?? null}
-          showWorkspaceFooter={Boolean(draftProjectId && (gitStatus || activeThreadHeader?.branch))}
-          hasActiveThread={Boolean(activeThreadHeader)}
-          hasDraftThread={Boolean(draftProjectId && !activeThreadHeader)}
-          activePendingApproval={activePendingApproval}
-          activePendingUserInput={activePendingUserInput}
-          activeQuestionIndex={activeQuestionIndex}
-          customInputAnswers={customInputAnswers}
-          selectedInputOptions={selectedInputOptions}
-          isRunning={activeThreadHeader?.session?.status === "running"}
-          layout={layout}
-          viewportColumns={dimensions.width}
+          composerText={composerText()}
+          submitError={submitError()}
+          provider={selectedProvider()}
+          modelSelection={selectedModelSelection()}
+          runtimeMode={selectedRuntimeMode()}
+          interactionMode={selectedInteractionMode()}
+          attachmentCount={draftAttachments().length}
+          branch={activeThreadHeader()?.branch ?? gitStatus()?.refName ?? null}
+          showWorkspaceFooter={Boolean(
+            draftProjectId() && (gitStatus() || activeThreadHeader()?.branch),
+          )}
+          hasActiveThread={Boolean(activeThreadHeader())}
+          hasDraftThread={Boolean(draftProjectId() && !activeThreadHeader())}
+          activePendingApproval={activePendingApproval()}
+          activePendingUserInput={activePendingUserInput()}
+          activeQuestionIndex={activeQuestionIndex()}
+          customInputAnswers={customInputAnswers()}
+          selectedInputOptions={selectedInputOptions()}
+          isRunning={activeThreadHeader()?.session?.status === "running"}
+          layout={layout()}
+          viewportColumns={dimensions().width}
           onCycleModel={() => runAsyncAction(() => performAction("model.next"))}
           onCycleRuntime={() => runAsyncAction(() => performAction("runtime.next"))}
           onCycleInteraction={() => runAsyncAction(() => performAction("interaction.next"))}
           onPrimaryAction={() => runAsyncAction(() => performAction("message.send"))}
           onStop={() => runAsyncAction(() => performAction("thread.stop"))}
-          focused={focusArea === "composer"}
-          controlsFocused={focusArea === "controls"}
+          focused={focusArea() === "composer"}
+          controlsFocused={focusArea() === "controls"}
           onFocusComposer={() => setFocusArea("composer")}
           onFocusControls={() => setFocusArea("controls")}
           theme={props.theme}
         />
       </box>
-      {visiblePanel === "palette" ? (
+      {visiblePanel() === "palette" ? (
         <box
           position="absolute"
-          left={paletteFrame.left}
-          top={paletteFrame.top}
-          width={paletteFrame.width}
-          height={paletteFrame.height}
+          left={paletteFrame().left}
+          top={paletteFrame().top}
+          width={paletteFrame().width}
+          height={paletteFrame().height}
           zIndex={35}
           backgroundColor="transparent"
         >
           <CommandPalette
-            view={paletteView}
+            view={paletteView()}
             onSelectItem={handlePaletteItem}
             onHighlightItem={handlePaletteHighlight}
-            selectedIndex={paletteSelectedIndex}
-            highlightedItemValue={addProjectBrowseHighlightedItemValue}
+            selectedIndex={paletteSelectedIndex()}
+            highlightedItemValue={addProjectBrowseHighlightedItemValue()}
             theme={props.theme}
           />
         </box>
@@ -1549,14 +1619,18 @@ function PendingUserInputPanel(props: {
   customAnswers: Readonly<Record<string, string>>;
   theme: TuiTheme;
 }) {
-  const questionIndex = Math.min(
-    props.questionIndex,
-    Math.max(props.pending.questions.length - 1, 0),
+  const questionIndex = createMemo(() =>
+    Math.min(props.questionIndex, Math.max(props.pending.questions.length - 1, 0)),
   );
-  const question = props.pending.questions[questionIndex];
-  if (!question) return null;
-  const selected = props.selectedOptions[question.id] ?? [];
-  const customAnswer = props.customAnswers[question.id] ?? "";
+  const question = createMemo(() => props.pending.questions[questionIndex()] ?? null);
+  const selected = createMemo(() => {
+    const activeQuestion = question();
+    return activeQuestion ? (props.selectedOptions[activeQuestion.id] ?? []) : [];
+  });
+  const customAnswer = createMemo(() => {
+    const activeQuestion = question();
+    return activeQuestion ? (props.customAnswers[activeQuestion.id] ?? "") : "";
+  });
   return (
     <box
       backgroundColor={props.theme.palette.surfaceInfo}
@@ -1567,25 +1641,30 @@ function PendingUserInputPanel(props: {
       marginBottom={1}
       flexDirection="column"
     >
-      <text fg={props.theme.palette.accent}>
-        {`input requested · ${questionIndex + 1}/${props.pending.questions.length} · ${displayText(question.header)}`}
-      </text>
-      <text fg={props.theme.palette.text}>{displayText(question.question)}</text>
-      {question.options.length > 0 ? (
+      {question() ? (
+        <text fg={props.theme.palette.accent}>
+          {`input requested · ${questionIndex() + 1}/${props.pending.questions.length} · ${displayText(question()!.header)}`}
+        </text>
+      ) : null}
+      {question() ? (
+        <text fg={props.theme.palette.text}>{displayText(question()!.question)}</text>
+      ) : null}
+      {question() && question()!.options.length > 0 ? (
         <box marginTop={1} flexDirection="row" overflow="hidden">
-          {question.options.slice(0, 4).map((option, index) => (
-            <ActionPill
-              key={option.label}
-              active={selected.includes(index)}
-              label={displayText(option.label)}
-              shortcut={`${index + 1}`}
-              theme={props.theme}
-            />
-          ))}
+          {question()!
+            .options.slice(0, 4)
+            .map((option, index) => (
+              <ActionPill
+                active={selected().includes(index)}
+                label={displayText(option.label)}
+                shortcut={`${index + 1}`}
+                theme={props.theme}
+              />
+            ))}
         </box>
       ) : null}
-      {customAnswer ? (
-        <text fg={props.theme.palette.muted}>{`custom: ${displayText(customAnswer)}`}</text>
+      {customAnswer() ? (
+        <text fg={props.theme.palette.muted}>{`custom: ${displayText(customAnswer())}`}</text>
       ) : null}
       <text fg={props.theme.palette.subtle}>left/right question · enter submit</text>
     </box>
@@ -1607,8 +1686,9 @@ function Sidebar(props: {
   onOpenKeybindings: () => void;
   theme: TuiTheme;
 }) {
-  const projects = sortedProjects(props.shell.projects);
-  const focused = props.focusArea === "projects" || props.focusArea === "threads";
+  const projects = createMemo(() => sortedProjects(props.shell.projects));
+  const focused = createMemo(() => props.focusArea === "projects" || props.focusArea === "threads");
+  const hasProjects = createMemo(() => props.shell.projects.length > 0);
   return (
     <box
       width={props.layout.sidebarWidth}
@@ -1624,7 +1704,7 @@ function Sidebar(props: {
         <text fg={props.theme.palette.text}>{props.layout.sidebarTitle}</text>
         {props.layout.showSidebarAlphaBadge ? <Badge label="ALPHA" theme={props.theme} /> : null}
       </box>
-      <scrollbox flexGrow={1} paddingLeft={1} paddingRight={1} focused={focused}>
+      <scrollbox flexGrow={1} paddingLeft={1} paddingRight={1} focused={focused()}>
         <SectionLabel
           label="PROJECTS"
           actions={[
@@ -1633,7 +1713,7 @@ function Sidebar(props: {
           ]}
           theme={props.theme}
         />
-        {props.shell.projects.length === 0 ? (
+        {!hasProjects() ? (
           <box
             paddingLeft={2}
             paddingRight={2}
@@ -1655,7 +1735,7 @@ function Sidebar(props: {
             )}
           </box>
         ) : null}
-        {projects.map((project) => {
+        {projects().map((project) => {
           const display = displayProject(project);
           const isActive = project.id === props.shell.selectedProjectId;
           const projectThreads = props.shell.threads
@@ -1664,7 +1744,7 @@ function Sidebar(props: {
           const isExpanded = props.expandedProjectIds.has(project.id);
           const projectStatus = resolveProjectStatus(projectThreads);
           return (
-            <box key={project.id} flexDirection="column">
+            <box flexDirection="column">
               <SidebarRow
                 active={isActive || (props.focusArea === "projects" && isActive)}
                 activeBackgroundColor={props.theme.palette.controlActive}
@@ -1701,7 +1781,6 @@ function Sidebar(props: {
                       const status = resolveThreadStatus(thread);
                       return (
                         <SidebarRow
-                          key={thread.id}
                           active={
                             isThreadActive || (props.focusArea === "threads" && isThreadActive)
                           }
@@ -1784,14 +1863,21 @@ function MainHeader(props: {
   onFocusControls: () => void;
   theme: TuiTheme;
 }) {
-  const fallbackTitle = props.projectTitle ? `New thread [${props.projectTitle}]` : "New thread";
-  const title = truncateTitleForDisplay(
-    props.thread ? displayThread(props.thread).title : fallbackTitle,
-    headerTitleMaxLength({
-      viewportColumns: props.viewportColumns,
-      showSidebarToggle: props.showSidebarToggle,
-      showHeaderProjectBadge: props.showProjectBadge,
-    }),
+  const title = createMemo(() => {
+    const fallbackTitle = props.projectTitle ? `New thread [${props.projectTitle}]` : "New thread";
+    return truncateTitleForDisplay(
+      props.thread ? displayThread(props.thread).title : fallbackTitle,
+      headerTitleMaxLength({
+        viewportColumns: props.viewportColumns,
+        showSidebarToggle: props.showSidebarToggle,
+        showHeaderProjectBadge: props.showProjectBadge,
+      }),
+    );
+  });
+  const gitIconColor = createMemo(() =>
+    props.gitStatus && props.gitStatus.workingTree.files.length > 0
+      ? props.theme.palette.success
+      : props.theme.palette.muted,
   );
   return (
     <box
@@ -1826,7 +1912,7 @@ function MainHeader(props: {
           />
         ) : null}
         <box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden" height={1}>
-          <text fg={props.theme.palette.text}>{title}</text>
+          <text fg={props.theme.palette.text}>{title()}</text>
         </box>
         {props.showProjectBadge && props.projectTitle ? (
           <Badge label={props.projectTitle} theme={props.theme} />
@@ -1839,11 +1925,7 @@ function MainHeader(props: {
           chrome="bare"
           width={4}
           justifyContent="flex-end"
-          iconColor={
-            props.gitStatus && props.gitStatus.workingTree.files.length > 0
-              ? props.theme.palette.success
-              : props.theme.palette.muted
-          }
+          iconColor={gitIconColor()}
           disabled={!props.gitStatus}
           active={props.focusArea === "controls"}
           onPress={() => {
@@ -1885,10 +1967,12 @@ function ConversationArea(props: {
   focused: boolean;
   theme: TuiTheme;
 }) {
-  const statusCards = landingStatusCards({
-    connection: props.connection,
-    banners: props.banners,
-  });
+  const statusCards = createMemo(() =>
+    landingStatusCards({
+      connection: props.connection,
+      banners: props.banners,
+    }),
+  );
   return (
     <scrollbox
       flexGrow={1}
@@ -1900,15 +1984,14 @@ function ConversationArea(props: {
       stickyStart="bottom"
       verticalScrollbarOptions={{ visible: false }}
     >
-      {props.showLandingLogo && statusCards.length === 0 ? (
+      {props.showLandingLogo && statusCards().length === 0 ? (
         <box height="100%" minHeight={8} flexDirection="column">
           <X1ShellLogo viewportColumns={props.viewportColumns} theme={props.theme} />
         </box>
       ) : null}
       {props.timeline.length === 0
-        ? statusCards.map((card) => (
+        ? statusCards().map((card) => (
             <box
-              key={`${card.title}:${card.detail}`}
               backgroundColor={props.theme.palette.surface}
               paddingLeft={2}
               paddingRight={2}
@@ -1931,13 +2014,7 @@ function ConversationArea(props: {
         ? props.timeline.map((entry) =>
             entry.kind === "message" ? (
               entry.role === "user" ? (
-                <box
-                  key={entry.key}
-                  width="100%"
-                  marginBottom={1}
-                  flexDirection="column"
-                  alignItems="flex-end"
-                >
+                <box width="100%" marginBottom={1} flexDirection="column" alignItems="flex-end">
                   <box width="70%" flexDirection="column" alignItems="flex-end">
                     <SafeMarkdown fg={props.theme.palette.text} content={entry.markdown} />
                   </box>
@@ -1947,7 +2024,6 @@ function ConversationArea(props: {
                 </box>
               ) : entry.role === "plan" ? (
                 <box
-                  key={entry.key}
                   backgroundColor={props.theme.palette.surfacePlan}
                   marginBottom={1}
                   paddingLeft={1}
@@ -1962,7 +2038,7 @@ function ConversationArea(props: {
                   <SafeMarkdown fg={props.theme.palette.text} content={entry.markdown} />
                 </box>
               ) : (
-                <box key={entry.key} width="100%" marginBottom={1} flexDirection="column">
+                <box width="100%" marginBottom={1} flexDirection="column">
                   <SafeMarkdown fg={props.theme.palette.text} content={entry.markdown} />
                   <text fg={props.theme.palette.subtle}>
                     {formatMessageTimestamp(entry.createdAt)}
@@ -1970,7 +2046,7 @@ function ConversationArea(props: {
                 </box>
               )
             ) : (
-              <ActivityRow key={entry.key} entry={entry} theme={props.theme} />
+              <ActivityRow entry={entry} theme={props.theme} />
             ),
           )
         : null}
@@ -2036,29 +2112,47 @@ function ComposerPanel(props: {
   onFocusControls: () => void;
   theme: TuiTheme;
 }) {
-  const hasPending = Boolean(props.activePendingApproval || props.activePendingUserInput);
-  const placeholder = composerPlaceholder({
-    hasActiveThread: props.hasActiveThread,
-    hasDraftThread: props.hasDraftThread,
-    composerText: props.composerText,
-    activePendingApproval: props.activePendingApproval,
-    activePendingUserInput: props.activePendingUserInput,
+  let textareaRef: TextareaRenderable | undefined;
+  let syncedTextareaText = props.composerText;
+  const hasPending = createMemo(() =>
+    Boolean(props.activePendingApproval || props.activePendingUserInput),
+  );
+  const placeholder = createMemo(() =>
+    composerPlaceholder({
+      hasActiveThread: props.hasActiveThread,
+      hasDraftThread: props.hasDraftThread,
+      composerText: props.composerText,
+      activePendingApproval: props.activePendingApproval,
+      activePendingUserInput: props.activePendingUserInput,
+    }),
+  );
+  const textareaHeight = createMemo(() =>
+    hasPending()
+      ? COMPOSER_PENDING_TEXTAREA_MIN_HEIGHT
+      : estimateComposerTextareaHeight({
+          text: props.composerText,
+          placeholder: placeholder(),
+          totalColumns: props.viewportColumns,
+          sidebarWidth: props.layout.sidebarWidth,
+          showSidebar: props.layout.showSidebar,
+        }),
+  );
+  const providerId = createMemo(
+    () => props.provider?.driver ?? props.modelSelection?.instanceId ?? "codex",
+  );
+  const modelLabel = createMemo(() => modelControlLabel(props.modelSelection, props.provider));
+  const traitsLabel = createMemo(() =>
+    composerTraitsLabel(props.modelSelection, props.provider, props.runtimeMode),
+  );
+  createEffect(() => {
+    const nextText = props.composerText;
+    if (!textareaRef || syncedTextareaText === nextText) return;
+    if (textareaRef.plainText !== nextText) textareaRef.setText(nextText);
+    syncedTextareaText = nextText;
   });
-  const textareaHeight = hasPending
-    ? COMPOSER_PENDING_TEXTAREA_MIN_HEIGHT
-    : estimateComposerTextareaHeight({
-        text: props.composerText,
-        placeholder,
-        totalColumns: props.viewportColumns,
-        sidebarWidth: props.layout.sidebarWidth,
-        showSidebar: props.layout.showSidebar,
-      });
-  const providerId = props.provider?.driver ?? props.modelSelection?.instanceId ?? "codex";
-  const modelLabel = modelControlLabel(props.modelSelection, props.provider);
-  const traitsLabel = composerTraitsLabel(props.modelSelection, props.provider, props.runtimeMode);
   return (
     <box
-      height={textareaHeight + (hasPending ? 7 : 6)}
+      height={textareaHeight() + (hasPending() ? 7 : 6)}
       paddingLeft={2}
       paddingRight={2}
       paddingBottom={1}
@@ -2074,7 +2168,7 @@ function ComposerPanel(props: {
             : props.theme.palette.composerBorderMuted
         }
         backgroundColor={props.theme.palette.composerPanel}
-        paddingTop={hasPending ? 0 : 1}
+        paddingTop={hasPending() ? 0 : 1}
         paddingBottom={1}
         paddingLeft={1}
         paddingRight={1}
@@ -2094,16 +2188,19 @@ function ComposerPanel(props: {
         ) : (
           <box
             marginBottom={1}
-            height={textareaHeight}
-            minHeight={textareaHeight}
+            height={textareaHeight()}
+            minHeight={textareaHeight()}
             paddingLeft={1}
             paddingRight={1}
           >
             <textarea
-              key={props.composerText}
+              ref={(value: TextareaRenderable) => {
+                textareaRef = value;
+                syncedTextareaText = props.composerText;
+              }}
               focused={props.focused}
               initialValue={props.composerText}
-              placeholder={placeholder}
+              placeholder={placeholder()}
               cursorColor={props.theme.palette.cursor}
               style={{
                 backgroundColor: props.theme.palette.composerPanel,
@@ -2126,22 +2223,22 @@ function ComposerPanel(props: {
         >
           <box flexDirection="row" alignItems="center" flexGrow={1} overflow="hidden" height={1}>
             <ToolbarButton
-              icon={providerIcon(providerId)}
-              iconColor={providerColor(providerId, props.theme)}
-              label={props.layout.showComposerModelLabel ? modelLabel : undefined}
+              icon={providerIcon(providerId())}
+              iconColor={providerColor(providerId(), props.theme)}
+              label={props.layout.showComposerModelLabel ? modelLabel() : undefined}
               compact={!props.layout.showComposerModelLabel}
               onPress={props.onCycleModel}
               active={props.controlsFocused}
               theme={props.theme}
             />
-            {traitsLabel ? (
+            {traitsLabel() ? (
               <>
                 {props.layout.showComposerDividers ? <FooterDivider theme={props.theme} /> : null}
                 <ToolbarButton
                   icon={composerTraitsIcon(props.modelSelection, props.provider)}
                   label={
                     props.layout.showComposerTraitsLabel
-                      ? truncateTitleForDisplay(traitsLabel, 14)
+                      ? truncateTitleForDisplay(traitsLabel() ?? "", 14)
                       : undefined
                   }
                   compact={!props.layout.showComposerTraitsLabel}
@@ -2308,7 +2405,6 @@ function SectionLabel(props: {
       <box flexDirection="row">
         {(props.actions ?? []).map((action) => (
           <IconButton
-            key={`${props.label}:${action.icon}`}
             icon={action.icon}
             active={action.active ?? false}
             disabled={action.disabled ?? false}
@@ -2329,8 +2425,8 @@ function IconButton(props: {
   onPress?: () => void;
   theme: TuiTheme;
 }) {
-  const [hovered, setHovered] = useState(false);
-  const active = !props.disabled && (props.active || hovered);
+  const [hovered, setHovered] = createSignal(false);
+  const active = createMemo(() => !props.disabled && (props.active || hovered()));
   return (
     <box
       width={props.width ?? 3}
@@ -2342,7 +2438,7 @@ function IconButton(props: {
       backgroundColor={
         props.disabled
           ? "transparent"
-          : active
+          : active()
             ? props.theme.palette.controlActive
             : props.theme.palette.control
       }
@@ -2354,7 +2450,7 @@ function IconButton(props: {
         fg={
           props.disabled
             ? props.theme.palette.subtle
-            : active
+            : active()
               ? props.theme.palette.text
               : props.theme.palette.muted
         }
@@ -2370,11 +2466,11 @@ function SidebarRow(props: {
   suppressHighlight?: boolean;
   activeBackgroundColor?: string;
   onPress?: () => void;
-  children: React.ReactNode;
+  children: JSX.Element;
   theme: TuiTheme;
 }) {
-  const [hovered, setHovered] = useState(false);
-  const active = props.active || hovered;
+  const [hovered, setHovered] = createSignal(false);
+  const active = createMemo(() => props.active || hovered());
   return (
     <box
       height={1}
@@ -2386,7 +2482,7 @@ function SidebarRow(props: {
       backgroundColor={
         props.suppressHighlight
           ? "transparent"
-          : active
+          : active()
             ? (props.activeBackgroundColor ?? props.theme.palette.controlActive)
             : "transparent"
       }
@@ -2413,20 +2509,22 @@ function ToolbarButton(props: {
   onPress: () => void;
   theme: TuiTheme;
 }) {
-  const [hovered, setHovered] = useState(false);
+  const [hovered, setHovered] = createSignal(false);
   const isBare = props.chrome === "bare";
-  const active = !props.disabled && (props.active || hovered);
-  const foreground = props.disabled
-    ? props.theme.palette.subtle
-    : active
-      ? props.theme.palette.text
-      : props.theme.palette.muted;
+  const active = createMemo(() => !props.disabled && (props.active || hovered()));
+  const foreground = createMemo(() =>
+    props.disabled
+      ? props.theme.palette.subtle
+      : active()
+        ? props.theme.palette.text
+        : props.theme.palette.muted,
+  );
   return (
     <box
       backgroundColor={
         isBare
           ? "transparent"
-          : active
+          : active()
             ? props.theme.palette.controlActive
             : props.theme.palette.control
       }
@@ -2446,11 +2544,11 @@ function ToolbarButton(props: {
       }}
     >
       {props.icon ? (
-        <text fg={props.iconColor ?? foreground}>
+        <text fg={props.iconColor ?? foreground()}>
           {props.label ? `${props.icon} ` : props.icon}
         </text>
       ) : null}
-      {props.label ? <text fg={foreground}>{props.label}</text> : null}
+      {props.label ? <text fg={foreground()}>{props.label}</text> : null}
     </box>
   );
 }
@@ -2466,8 +2564,8 @@ function ComposerSendButton(props: {
   onPress: () => void;
   theme: TuiTheme;
 }) {
-  const [hovered, setHovered] = useState(false);
-  const isStop = props.variant === "stop";
+  const [hovered, setHovered] = createSignal(false);
+  const isStop = createMemo(() => props.variant === "stop");
   return (
     <box
       width={3}
@@ -2475,9 +2573,9 @@ function ComposerSendButton(props: {
       backgroundColor={
         props.disabled
           ? props.theme.palette.controlActive
-          : isStop
+          : isStop()
             ? props.theme.palette.composerStop
-            : hovered
+            : hovered()
               ? props.theme.palette.composerSendHover
               : props.theme.palette.composerSend
       }

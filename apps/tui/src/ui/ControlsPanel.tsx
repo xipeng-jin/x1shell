@@ -1,4 +1,4 @@
-import type React from "react";
+import type { JSX } from "solid-js";
 import type {
   ModelSelection,
   ProviderInteractionMode,
@@ -16,7 +16,7 @@ export function ControlsPanel(props: {
   readonly interactionMode: ProviderInteractionMode;
   readonly attachmentCount: number;
   readonly theme: TuiTheme;
-}): React.ReactNode {
+}): JSX.Element {
   const providerName =
     (props.provider ? providerLabel(props.provider) : props.modelSelection?.instanceId) ??
     "no provider";

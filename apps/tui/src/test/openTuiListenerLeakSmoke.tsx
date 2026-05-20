@@ -1,6 +1,5 @@
-import React from "react";
-import { createTestRenderer } from "@opentui/core/testing";
-import { createRoot } from "@opentui/react";
+import { testRender } from "@opentui/solid";
+import type { createTestRenderer } from "@opentui/core/testing";
 import { TuiRuntimeApp } from "../app/TuiRuntimeApp.js";
 import { createDebugBuffer } from "../domain/debug.js";
 import { createOrchestrationStore } from "../state/orchestrationStore.js";
@@ -8,25 +7,16 @@ import { createServerConfigStore } from "../state/serverConfigStore.js";
 import { createThreadDetailStore } from "../state/threadDetailStore.js";
 import { resolveTheme } from "../terminal/theme.js";
 
-const setup = await createTestRenderer({
-  width: 100,
-  height: 30,
-  screenMode: "main-screen",
-  consoleMode: "disabled",
-  externalOutputMode: "passthrough",
-});
-const root = createRoot(setup.renderer);
+const serverStore = createServerConfigStore();
+const orchestrationStore = createOrchestrationStore();
+const threadDetailStore = createThreadDetailStore();
+const debugBuffer = createDebugBuffer();
 
-try {
-  const serverStore = createServerConfigStore();
-  const orchestrationStore = createOrchestrationStore();
-  const threadDetailStore = createThreadDetailStore();
-  const debugBuffer = createDebugBuffer();
-
-  root.render(
-    React.createElement(TuiRuntimeApp, {
-      interruptRequestToken: 0,
-      paths: {
+const setup = await testRender(
+  () => (
+    <TuiRuntimeApp
+      interruptRequestToken={0}
+      paths={{
         configDir: "/tmp/x1shell/config",
         dataDir: "/tmp/x1shell/data",
         cacheDir: "/tmp/x1shell/cache",
@@ -35,16 +25,26 @@ try {
         prefsFile: "/tmp/x1shell/config/preferences.json",
         logFile: "/tmp/x1shell/tui.log",
         headlessFrameFile: "/tmp/x1shell/frame.txt",
-      },
-      launchCwd: "/tmp/x1shell",
-      theme: resolveTheme(undefined),
-      serverStore,
-      orchestrationStore,
-      threadDetailStore,
-      debugBuffer,
-      onRequestExit: () => {},
-    }),
-  );
+      }}
+      launchCwd="/tmp/x1shell"
+      theme={resolveTheme(undefined)}
+      serverStore={serverStore}
+      orchestrationStore={orchestrationStore}
+      threadDetailStore={threadDetailStore}
+      debugBuffer={debugBuffer}
+      onRequestExit={() => {}}
+    />
+  ),
+  {
+    width: 100,
+    height: 30,
+    screenMode: "main-screen",
+    consoleMode: "disabled",
+    externalOutputMode: "passthrough",
+  },
+);
+
+try {
   await settleEffects();
   serverStore.setConnection("connecting");
   await settleEffects();
@@ -58,7 +58,6 @@ try {
 
   console.log(JSON.stringify({ baseline, after: listenerCounts(setup.renderer) }));
 } finally {
-  root.unmount();
   setup.renderer.destroy();
 }
 

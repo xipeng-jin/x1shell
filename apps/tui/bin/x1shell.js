@@ -13,6 +13,8 @@ const minimumBunVersion = "1.3.11";
 
 if ("Bun" in globalThis) {
   warnIfUnsupportedBunVersion(globalThis.Bun.version);
+  process.chdir(packageRoot);
+  await import("@opentui/solid/preload");
   const module = await import(pathToFileURL(entry).href);
   await module.main();
 } else {
@@ -31,9 +33,13 @@ if ("Bun" in globalThis) {
 
   warnIfUnsupportedBunVersion(versionResult.stdout.trim());
 
-  const result = spawnSync("bun", [entry, ...process.argv.slice(2)], {
-    stdio: "inherit",
-  });
+  const result = spawnSync(
+    "bun",
+    ["--cwd", packageRoot, "--preload", "@opentui/solid/preload", entry, ...process.argv.slice(2)],
+    {
+      stdio: "inherit",
+    },
+  );
 
   if (result.error) {
     if (result.error.code === "ENOENT") {

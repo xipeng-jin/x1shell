@@ -1,7 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { createTestRenderer } from "@opentui/core/testing";
-import { createRoot } from "@opentui/react";
+import { testRender } from "@opentui/solid";
 import { App } from "../app/App.js";
 import { resolveTheme } from "../terminal/theme.js";
 
@@ -11,18 +10,8 @@ if (!framePath) {
 }
 
 const theme = resolveTheme("dark");
-const setup = await createTestRenderer({
-  width: 120,
-  height: 30,
-  screenMode: "main-screen",
-  consoleMode: "disabled",
-  externalOutputMode: "passthrough",
-  backgroundColor: theme.palette.canvas,
-});
-const root = createRoot(setup.renderer);
-
-try {
-  root.render(
+const setup = await testRender(
+  () => (
     <App
       interruptRequestToken={0}
       paths={{} as never}
@@ -36,8 +25,19 @@ try {
         ],
       })}
       onRequestExit={() => {}}
-    />,
-  );
+    />
+  ),
+  {
+    width: 120,
+    height: 30,
+    screenMode: "main-screen",
+    consoleMode: "disabled",
+    externalOutputMode: "passthrough",
+    backgroundColor: theme.palette.canvas,
+  },
+);
+
+try {
   await setup.renderOnce();
 
   let sourcesFrame = "";
@@ -45,22 +45,25 @@ try {
     for (let x = 24; x <= 33; x += 1) {
       await setup.mockMouse.click(x, y);
       await setup.renderOnce();
-      sourcesFrame = setup.captureCharFrame();
-      if (sourcesFrame.includes("Add project")) break;
+      sourcesFrame = await captureFrameContaining("Sources");
+      if (sourcesFrame.includes("Sources")) break;
     }
-    if (sourcesFrame.includes("Add project")) break;
+    if (sourcesFrame.includes("Sources")) break;
   }
 
   setup.mockInput.pressEnter();
   await setup.renderOnce();
+  setup.mockInput.pressKey("~");
+  setup.mockInput.pressKey("/");
   const browseFrame = await captureFrameContaining("workspace");
 
   await mkdir(dirname(framePath), { recursive: true });
   await writeFile(framePath, `${sourcesFrame}\n---\n${browseFrame}`, "utf8");
 } finally {
-  root.unmount();
   setup.renderer.destroy();
 }
+
+process.exit(0);
 
 async function captureFrameContaining(expected: string): Promise<string> {
   let frame = "";

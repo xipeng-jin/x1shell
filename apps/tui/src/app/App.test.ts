@@ -25,6 +25,8 @@ import { resolveCommandPaletteFrame } from "./commandPaletteFrame.js";
 const TUI_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const HEADLESS_SMOKE_TEST_TIMEOUT_MS = 15_000;
 const HEADLESS_SMOKE_CHILD_TIMEOUT_MS = 12_000;
+const DIST_SMOKE_TEST_TIMEOUT_MS = 30_000;
+const DIST_SMOKE_CHILD_TIMEOUT_MS = 25_000;
 
 describe("resolveCommandPaletteFrame", () => {
   it("centers the palette against the full viewport and places it at the web top offset", () => {
@@ -54,6 +56,50 @@ describe("resolveCommandPaletteFrame", () => {
 });
 
 describe("App headless smoke", () => {
+  it(
+    "builds and launches the packaged dist entry with Solid JSX lowered",
+    () => {
+      const dir = createTempDir("x1shell-tui-dist-");
+      const framePath = join(dir, "frame.txt");
+
+      execFileSync("bun", ["run", "tsdown"], {
+        cwd: TUI_PACKAGE_DIR,
+        stdio: "pipe",
+        timeout: DIST_SMOKE_CHILD_TIMEOUT_MS,
+      });
+      execFileSync("bun", ["run", "scripts/transform-solid-dist.mjs"], {
+        cwd: TUI_PACKAGE_DIR,
+        stdio: "pipe",
+        timeout: DIST_SMOKE_CHILD_TIMEOUT_MS,
+      });
+      execFileSync(
+        "bun",
+        [
+          "--preload",
+          "@opentui/solid/preload",
+          "./dist/index.mjs",
+          "--headless",
+          "--headless-width=90",
+          "--headless-height=24",
+          `--headless-frame=${framePath}`,
+        ],
+        {
+          cwd: TUI_PACKAGE_DIR,
+          env: headlessSmokeEnv(dir, { X1SHELL_HEADLESS_FIXTURE: "1" }),
+          stdio: "pipe",
+          timeout: HEADLESS_SMOKE_CHILD_TIMEOUT_MS,
+        },
+      );
+
+      const frame = readFileSync(framePath, "utf8");
+      expect(frame).toContain("X1Shell");
+      expect(frame).toContain("Thread Shell Fresh");
+      expect(frame).toContain("draft");
+      expect(frame).toContain("Full access");
+    },
+    DIST_SMOKE_TEST_TIMEOUT_MS,
+  );
+
   it(
     "captures a static boot frame",
     () => {
@@ -327,18 +373,31 @@ function captureHeadlessFrame(
     ],
     {
       cwd: TUI_PACKAGE_DIR,
-      env: {
-        ...process.env,
-        X1SHELL_HEADLESS_FIXTURE: options.X1SHELL_HEADLESS_FIXTURE ?? "0",
-        X1SHELL_HEADLESS_SETTLE_MS: "25",
-        X1SHELL_SERVER_ENTRY: "",
-        X1SHELL_CONFIG_HOME: options.X1SHELL_CONFIG_HOME,
-        X1SHELL_DATA_HOME: options.X1SHELL_DATA_HOME,
-        X1SHELL_CACHE_HOME: options.X1SHELL_CACHE_HOME,
-        X1SHELL_STATE_HOME: options.X1SHELL_STATE_HOME,
-      },
+      env: headlessSmokeEnv(dirname(framePath), options),
       stdio: "pipe",
       timeout: HEADLESS_SMOKE_CHILD_TIMEOUT_MS,
     },
   );
+}
+
+function headlessSmokeEnv(
+  dir: string,
+  options: {
+    readonly X1SHELL_CONFIG_HOME?: string;
+    readonly X1SHELL_DATA_HOME?: string;
+    readonly X1SHELL_CACHE_HOME?: string;
+    readonly X1SHELL_STATE_HOME?: string;
+    readonly X1SHELL_HEADLESS_FIXTURE?: string;
+  },
+): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    X1SHELL_HEADLESS_FIXTURE: options.X1SHELL_HEADLESS_FIXTURE ?? "0",
+    X1SHELL_HEADLESS_SETTLE_MS: "25",
+    X1SHELL_SERVER_ENTRY: "",
+    X1SHELL_CONFIG_HOME: options.X1SHELL_CONFIG_HOME ?? join(dir, "config"),
+    X1SHELL_DATA_HOME: options.X1SHELL_DATA_HOME ?? join(dir, "data"),
+    X1SHELL_CACHE_HOME: options.X1SHELL_CACHE_HOME ?? join(dir, "cache"),
+    X1SHELL_STATE_HOME: options.X1SHELL_STATE_HOME ?? join(dir, "state"),
+  };
 }

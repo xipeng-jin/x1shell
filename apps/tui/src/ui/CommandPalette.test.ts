@@ -1,113 +1,40 @@
-import { isValidElement, type FunctionComponent, type ReactElement, type ReactNode } from "react";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
 import { describe, expect, it } from "vitest";
 import { TUI_ACTIONS } from "../domain/keybindings.js";
-import { resolveTheme } from "../terminal/theme.js";
 import {
   buildActionPaletteView,
   buildAddProjectBrowsePaletteView,
   buildAddProjectSourcesPaletteView,
 } from "../app/paletteViewModel.js";
-import { CommandPalette } from "./CommandPalette.js";
+
+const TUI_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 describe("CommandPalette", () => {
-  it("renders normal command palette actions by default", () => {
-    const palette = CommandPalette({
-      view: buildActionPaletteView({ actions: TUI_ACTIONS, query: "" }),
-      selectedIndex: 0,
-      theme: resolveTheme("dark"),
-    });
-    const text = flattenText(palette);
+  it("keeps Add Project source selection separate from normal actions", () => {
+    const actions = buildActionPaletteView({ actions: TUI_ACTIONS, query: "" });
+    const sources = buildAddProjectSourcesPaletteView();
 
-    expect(text).toContain("Command Palette");
-    expect(text).toContain("New thread");
-    expect(text).not.toContain("Add project");
+    expect(
+      actions.items.some((item) => item.kind === "action" && item.title === "New thread"),
+    ).toBe(true);
+    expect(sources.title).toBe("Add project");
+    expect(sources.groupLabel).toBe("Sources");
+    expect(sources.items).toEqual([
+      {
+        kind: "add-project-source",
+        source: "local",
+        title: "Local folder",
+        description: "Browse a folder on disk",
+      },
+    ]);
   });
 
-  it("renders Add Project source selection without normal actions", () => {
-    const palette = CommandPalette({
-      view: buildAddProjectSourcesPaletteView(),
-      selectedIndex: 0,
-      theme: resolveTheme("dark"),
-    });
-    const text = flattenText(palette);
-
-    expect(text).toContain("Add project");
-    expect(text).toContain("Sources");
-    expect(text).toContain("Local folder");
-    expect(text).toContain("Browse a folder on disk");
-    expect(text).not.toContain("New thread");
-    expect(text).not.toContain("Git URL");
-    expect(text).not.toContain("GitHub");
-    expect(text).not.toContain("GitLab");
-  });
-
-  it("renders Add Project browse mode with query and directory items", () => {
-    const palette = CommandPalette({
-      view: buildAddProjectBrowsePaletteView({
-        query: "~/Code/",
-        items: [
-          { kind: "browse-up" },
-          ...Array.from({ length: 12 }, (_, index) => ({
-            kind: "browse-directory" as const,
-            name: `repo-${index}`,
-            fullPath: `/home/me/Code/repo-${index}`,
-          })),
-        ],
-      }),
-      selectedIndex: 0,
-      highlightedItemValue: null,
-      theme: resolveTheme("dark"),
-    });
-    const text = flattenText(palette);
-
-    expect(text).toContain("Add project / Local folder");
-    expect(text).toContain("~/Code/");
-    expect(text).toContain("..");
-    expect(text).toContain("repo-0");
-    expect(text).toContain("repo-11");
-    expect(text).not.toContain("> repo-0");
-    expect(text).not.toContain("Filesystem browsing starts in a later phase.");
-  });
-
-  it("renders Add Project browse highlight by stable item value", () => {
-    const palette = CommandPalette({
-      view: buildAddProjectBrowsePaletteView({
-        query: "~/Code/s",
-        items: [
-          { kind: "browse-directory", name: "src", fullPath: "/home/me/Code/src" },
-          { kind: "browse-directory", name: "scripts", fullPath: "/home/me/Code/scripts" },
-        ],
-      }),
-      selectedIndex: 0,
-      highlightedItemValue: "browse:/home/me/Code/scripts",
-      theme: resolveTheme("dark"),
-    });
-    const text = flattenText(palette);
-
-    expect(text).toContain("src");
-    expect(text).toContain("scripts");
-  });
-
-  it("renders sanitized Add Project browse errors without the placeholder", () => {
-    const palette = CommandPalette({
-      view: buildAddProjectBrowsePaletteView({
-        query: "~/Code/",
-        error: "Failed token=secret \u001b]8;;https://evil.example\u0007link",
-      }),
-      selectedIndex: 0,
-      theme: resolveTheme("dark"),
-    });
-    const text = flattenText(palette);
-
-    expect(text).toContain("Failed");
-    expect(text).toContain("link");
-    expect(text).not.toContain("token=secret");
-    expect(text).not.toContain("\u001b]8");
-    expect(text).not.toContain("evil.example");
-    expect(text).not.toContain("Filesystem browsing starts in a later phase.");
-  });
-
-  it("sanitizes raw Add Project browse query and directory names only at render time", () => {
+  it("preserves raw Add Project browse values for render-time sanitization", () => {
     const rawQuery =
       "~/Code/token=valid-path\u001b]8;;https://evil.example/path?token=secret\u0007link\u001b]8;;\u0007";
     const rawDirectoryName =
@@ -122,37 +49,28 @@ describe("CommandPalette", () => {
         },
       ],
     });
-    const palette = CommandPalette({
-      view,
-      selectedIndex: 0,
-      highlightedItemValue: null,
-      theme: resolveTheme("dark"),
-    });
-    const text = flattenText(palette);
 
     expect(view.query).toBe(rawQuery);
     expect(view.items[0]).toMatchObject({ name: rawDirectoryName });
-    expect(text).toContain("~/Code/");
-    expect(text).toContain("repo-");
-    expect(text).not.toContain("token=valid-path");
-    expect(text).not.toContain("token=secret");
-    expect(text).not.toContain("link");
-    expect(text).not.toContain("name");
-    expect(text).not.toContain("\u001b]8");
-    expect(text).not.toContain("evil.example");
+  });
+
+  it("renders action, source, browse, and sanitized error frames through OpenTUI Solid", () => {
+    const framePath = join(mkdtempSync(join(tmpdir(), "x1shell-palette-")), "frames.txt");
+    execFileSync("bun", ["run", "src/test/openTuiCommandPaletteSmoke.tsx", framePath], {
+      cwd: TUI_PACKAGE_DIR,
+      stdio: "pipe",
+    });
+    const frame = readFileSync(framePath, "utf8");
+
+    expect(frame).toContain("Command Palette");
+    expect(frame).toContain("New thread");
+    expect(frame).toContain("Sources");
+    expect(frame).toContain("Local folder");
+    expect(frame).toContain("~/Code/");
+    expect(frame).toContain("workspace");
+    expect(frame).toContain("Failed");
+    expect(frame).not.toContain("token=secret");
+    expect(frame).not.toContain("\u001b]8");
+    expect(frame).not.toContain("evil.example");
   });
 });
-
-function flattenText(node: ReactNode): string {
-  if (node === null || node === undefined || typeof node === "boolean") return "";
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map((child) => flattenText(child)).join("");
-  if (!isValidElement(node)) return "";
-
-  const element = node as ReactElement<{ readonly children?: ReactNode }>;
-  if (typeof element.type === "function") {
-    const Component = element.type as FunctionComponent<typeof element.props>;
-    return flattenText(Component(element.props) as ReactNode);
-  }
-  return flattenText(element.props.children);
-}

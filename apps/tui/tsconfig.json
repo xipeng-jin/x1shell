@@ -2,8 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
-    "jsx": "react-jsx",
-    "jsxImportSource": "@opentui/react",
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid",
     "types": ["bun", "node"],
     "lib": ["ESNext", "DOM", "esnext.disposable"],
     "plugins": [
