@@ -141,29 +141,36 @@ describe("App headless smoke", () => {
         stdio: "pipe",
         timeout: DIST_SMOKE_CHILD_TIMEOUT_MS,
       });
-      writeFileSync(
-        join(TUI_PACKAGE_DIR, "dist", "index.mjs"),
-        `throw new Error("stale dist sentinel: root start:tui must not load dist");\n`,
-        "utf8",
-      );
+      const distEntryPath = join(TUI_PACKAGE_DIR, "dist", "index.mjs");
+      const realDistEntry = readFileSync(distEntryPath, "utf8");
 
-      execFileSync(
-        "bun",
-        [
-          "start:tui",
-          "--",
-          "--headless",
-          "--headless-width=90",
-          "--headless-height=24",
-          `--headless-frame=${framePath}`,
-        ],
-        {
-          cwd: REPO_ROOT_DIR,
-          env: headlessSmokeEnv(dir, { X1SHELL_HEADLESS_FIXTURE: "1" }),
-          stdio: "pipe",
-          timeout: HEADLESS_SMOKE_CHILD_TIMEOUT_MS,
-        },
-      );
+      try {
+        writeFileSync(
+          distEntryPath,
+          `throw new Error("stale dist sentinel: root start:tui must not load dist");\n`,
+          "utf8",
+        );
+
+        execFileSync(
+          "bun",
+          [
+            "start:tui",
+            "--",
+            "--headless",
+            "--headless-width=90",
+            "--headless-height=24",
+            `--headless-frame=${framePath}`,
+          ],
+          {
+            cwd: REPO_ROOT_DIR,
+            env: headlessSmokeEnv(dir, { X1SHELL_HEADLESS_FIXTURE: "1" }),
+            stdio: "pipe",
+            timeout: HEADLESS_SMOKE_CHILD_TIMEOUT_MS,
+          },
+        );
+      } finally {
+        writeFileSync(distEntryPath, realDistEntry, "utf8");
+      }
 
       const frame = readFileSync(framePath, "utf8");
       expect(frame).toContain("X1Shell");
