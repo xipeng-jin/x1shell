@@ -1027,6 +1027,9 @@ export function App(props: {
         setAddProjectBrowseHighlightedItemValue(null);
         setAddProjectBrowseWindowStart(0);
         setAddProjectBrowseQuery((query) => appendAddProjectBrowseQuery(query, text));
+      } else if (paletteMode() === "themes") {
+        if (themeCommitPending()) return;
+        setPaletteQuery((query) => appendPaletteQuery(query, text));
       } else if (paletteMode() === "actions") {
         setPaletteQuery((query) => appendPaletteQuery(query, text));
       }
@@ -1274,6 +1277,13 @@ export function App(props: {
       setPaletteQuery("");
       setThemePaletteWindowStart(0);
       setThemeInitialId(null);
+    } catch (error) {
+      if (themeCommitToken() === token) {
+        props.onCancelThemePreview?.();
+        setThemeConfirmed(false);
+        setSubmitError(displayText(String(error)));
+      }
+      throw error;
     } finally {
       if (themeCommitToken() === token) setThemeCommitPending(false);
     }
@@ -1822,6 +1832,18 @@ export function App(props: {
           theme={props.theme}
         />
       </box>
+      {visiblePanel() === "palette" && paletteMode() === "themes" ? (
+        <box
+          position="absolute"
+          left={0}
+          top={0}
+          bottom={0}
+          right={0}
+          zIndex={34}
+          backgroundColor="transparent"
+          onMouseDown={closePalette}
+        />
+      ) : null}
       {visiblePanel() === "palette" ? (
         <box
           position="absolute"

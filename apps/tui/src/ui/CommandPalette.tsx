@@ -154,7 +154,7 @@ export function resolvePaletteColors(theme: TuiTheme): {
     selected: theme.palette.selectionActive,
     selectedText: selectedListItemForeground(theme),
     text: theme.palette.text,
-    currentText: theme.palette.selectionActive,
+    currentText: theme.palette.text,
     muted: theme.palette.muted,
     group: theme.palette.accent,
   };
