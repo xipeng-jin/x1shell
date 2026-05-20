@@ -10,6 +10,7 @@ import { resolveCliConfig } from "./cli/config.js";
 import { readPreferences, writePreferences } from "./cli/preferences.js";
 import { resolveBearerAttachTarget, resolveBootstrapAttachTarget } from "./runtime/attach.js";
 import { createTuiConnectionController } from "./runtime/connection.js";
+import { resolveStartupThemeId } from "./runtime/startupTheme.js";
 import {
   startLocalManagedSupervisor,
   type LocalManagedSupervisor,
@@ -22,7 +23,7 @@ import {
   removeAddedProcessListeners,
 } from "./runtime/processListeners.js";
 import { resolveKeyboardPolicy } from "./terminal/keyboard.js";
-import { resolveTheme, resolveThemeId } from "./terminal/theme.js";
+import { resolveTheme } from "./terminal/theme.js";
 import { createServerConfigStore } from "./state/serverConfigStore.js";
 import { createOrchestrationStore } from "./state/orchestrationStore.js";
 import { createThreadDetailStore } from "./state/threadDetailStore.js";
@@ -60,7 +61,7 @@ async function runHeadless(
   preferences: Awaited<ReturnType<typeof readPreferences>>,
   logger: ReturnType<typeof createLogger>,
 ): Promise<void> {
-  const theme = resolveTheme(preferences.theme ?? config.theme);
+  const theme = resolveTheme(resolveStartupThemeId(config.theme, preferences.theme));
   const serverStore = createServerConfigStore();
   const launchCwd = process.cwd();
   const orchestrationStore = createOrchestrationStore({ launchCwd });
@@ -239,7 +240,7 @@ async function runInteractive(
   logger: ReturnType<typeof createLogger>,
 ): Promise<void> {
   const keyboard = resolveKeyboardPolicy(process.env, preferences);
-  const theme = resolveTheme(preferences.theme ?? config.theme);
+  const theme = resolveTheme(resolveStartupThemeId(config.theme, preferences.theme));
   const setup = await createInteractiveRenderer(keyboard, theme);
   const { renderer } = setup;
   let shuttingDown = false;
@@ -304,7 +305,7 @@ async function runInteractive(
 
   try {
     await render(() => {
-      const initialThemeId = resolveThemeId(preferences.theme ?? config.theme);
+      const initialThemeId = resolveStartupThemeId(config.theme, preferences.theme);
       const [themeId, setThemeId] = createSignal(initialThemeId);
       let committedThemeId = initialThemeId;
       let themeCommitSequence = 0;
