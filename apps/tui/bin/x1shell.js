@@ -9,12 +9,13 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const builtEntry = resolve(packageRoot, "dist/index.mjs");
 const sourceEntry = resolve(packageRoot, "src/index.tsx");
 const entry = existsSync(builtEntry) ? builtEntry : sourceEntry;
+const preloadEntryUrl = import.meta.resolve("@opentui/solid/preload");
+const preloadEntry = fileURLToPath(preloadEntryUrl);
 const minimumBunVersion = "1.3.11";
 
 if ("Bun" in globalThis) {
   warnIfUnsupportedBunVersion(globalThis.Bun.version);
-  process.chdir(packageRoot);
-  await import("@opentui/solid/preload");
+  await import(preloadEntryUrl);
   const module = await import(pathToFileURL(entry).href);
   await module.main();
 } else {
@@ -33,13 +34,9 @@ if ("Bun" in globalThis) {
 
   warnIfUnsupportedBunVersion(versionResult.stdout.trim());
 
-  const result = spawnSync(
-    "bun",
-    ["--cwd", packageRoot, "--preload", "@opentui/solid/preload", entry, ...process.argv.slice(2)],
-    {
-      stdio: "inherit",
-    },
-  );
+  const result = spawnSync("bun", ["--preload", preloadEntry, entry, ...process.argv.slice(2)], {
+    stdio: "inherit",
+  });
 
   if (result.error) {
     if (result.error.code === "ENOENT") {

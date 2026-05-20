@@ -75,6 +75,13 @@ describe("App headless smoke", () => {
     expect(tuiPackage.bin?.x1shell).toBe("./bin/x1shell.js");
   });
 
+  it("keeps the packaged bin from forcing the package directory as cwd", () => {
+    const binSource = readFileSync(join(TUI_PACKAGE_DIR, "bin", "x1shell.js"), "utf8");
+
+    expect(binSource).not.toContain("process.chdir(packageRoot)");
+    expect(binSource).not.toMatch(/"--cwd",\s*packageRoot/);
+  });
+
   it("lowers OpenTUI Solid TSX through the build plugin", async () => {
     const transformed = await transformSolidOpenTuiJsx(
       'const label: string = "Hello"; export const view = <box><text>{label}</text></box>;',
@@ -179,6 +186,70 @@ describe("App headless smoke", () => {
       expect(frame).toContain("Full access");
     },
     DIST_SMOKE_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "preserves the caller cwd when the packaged bin is launched by Node",
+    () => {
+      const dir = createTempDir("x1shell-bin-node-cwd-");
+      const workspaceDir = join(dir, "caller-workspace");
+      const framePath = join(dir, "frame.txt");
+      mkdirSync(workspaceDir, { recursive: true });
+
+      execFileSync(
+        "node",
+        [
+          join(TUI_PACKAGE_DIR, "bin", "x1shell.js"),
+          "--headless",
+          "--headless-width=90",
+          "--headless-height=24",
+          `--headless-frame=${framePath}`,
+        ],
+        {
+          cwd: workspaceDir,
+          env: headlessSmokeEnv(dir, {}),
+          stdio: "pipe",
+          timeout: HEADLESS_SMOKE_CHILD_TIMEOUT_MS,
+        },
+      );
+
+      const frame = readFileSync(framePath, "utf8");
+      expect(frame).toContain("New thread [caller-workspace]");
+      expect(frame).not.toContain("New thread [tui]");
+    },
+    HEADLESS_SMOKE_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "preserves the caller cwd when the packaged bin is launched by Bun",
+    () => {
+      const dir = createTempDir("x1shell-bin-bun-cwd-");
+      const workspaceDir = join(dir, "caller-workspace");
+      const framePath = join(dir, "frame.txt");
+      mkdirSync(workspaceDir, { recursive: true });
+
+      execFileSync(
+        "bun",
+        [
+          join(TUI_PACKAGE_DIR, "bin", "x1shell.js"),
+          "--headless",
+          "--headless-width=90",
+          "--headless-height=24",
+          `--headless-frame=${framePath}`,
+        ],
+        {
+          cwd: workspaceDir,
+          env: headlessSmokeEnv(dir, {}),
+          stdio: "pipe",
+          timeout: HEADLESS_SMOKE_CHILD_TIMEOUT_MS,
+        },
+      );
+
+      const frame = readFileSync(framePath, "utf8");
+      expect(frame).toContain("New thread [caller-workspace]");
+      expect(frame).not.toContain("New thread [tui]");
+    },
+    HEADLESS_SMOKE_TEST_TIMEOUT_MS,
   );
 
   it(
