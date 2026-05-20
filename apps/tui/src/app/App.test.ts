@@ -14,6 +14,7 @@ import {
   canAppendComposerAttachment,
   canHandlePrintableShortcut,
   composerAttachmentLimitMessage,
+  appendComposerText,
   appendAddProjectBrowseQuery,
   appendPaletteQuery,
   MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH,
@@ -369,6 +370,34 @@ describe("App headless smoke", () => {
   );
 
   it(
+    "routes OpenTUI bracketed paste through composer and palette input",
+    () => {
+      const dir = createTempDir("x1shell-tui-paste-smoke-");
+      const framePath = join(dir, "frames.txt");
+      execFileSync("bun", ["run", "src/test/openTuiPasteSmoke.tsx", framePath], {
+        cwd: TUI_PACKAGE_DIR,
+        stdio: "pipe",
+        timeout: HEADLESS_SMOKE_CHILD_TIMEOUT_MS,
+      });
+
+      const frames = readFileSync(framePath, "utf8");
+      const paletteFrame = sectionFrame(frames, "palette");
+      const attachmentFrame = sectionFrame(frames, "attachment");
+      const composerLineBehindPalette =
+        paletteFrame.split("\n").find((line) => line.includes("pasted composer text")) ?? "";
+      expect(frames).toContain("pasted composer text");
+      expect(frames).toContain("help");
+      expect(composerLineBehindPalette).toContain("pasted composer text");
+      expect(composerLineBehindPalette).not.toContain("help");
+      expect(attachmentFrame).toContain("Attached");
+      expect(attachmentFrame).toContain("pasted image");
+      expect(attachmentFrame).not.toContain("data:image/png");
+      expect(frames).not.toContain("\u001b]");
+    },
+    HEADLESS_SMOKE_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "captures a compact logo boot frame on narrow terminals",
     () => {
       const dir = createTempDir("x1shell-tui-narrow-");
@@ -508,6 +537,18 @@ describe("App headless smoke", () => {
     );
   });
 
+  it("keeps pasted composer text raw except terminal-control stripping", () => {
+    const text = appendComposerText(
+      "ask ",
+      "token=valid-user-text\u001b]8;;https://evil.example\u0007link",
+    );
+
+    expect(text).toBe("ask token=valid-user-textlink");
+    expect(text).not.toContain("\u001b]8");
+    expect(text).not.toContain("evil.example");
+    expect(text).toContain("token=valid-user-text");
+  });
+
   it("returns Add Project browse to sources when Backspace deletes the final character", () => {
     expect(applyAddProjectBrowseBackspace("~/")).toEqual({ kind: "browse", query: "~" });
     expect(applyAddProjectBrowseBackspace("a")).toEqual({ kind: "sources" });
@@ -604,4 +645,13 @@ function headlessSmokeEnv(
     X1SHELL_CACHE_HOME: options.X1SHELL_CACHE_HOME ?? join(dir, "cache"),
     X1SHELL_STATE_HOME: options.X1SHELL_STATE_HOME ?? join(dir, "state"),
   };
+}
+
+function sectionFrame(frames: string, name: string): string {
+  const marker = `=== ${name} ===`;
+  const start = frames.indexOf(marker);
+  if (start === -1) return "";
+  const rest = frames.slice(start + marker.length);
+  const next = rest.indexOf("\n=== ");
+  return next === -1 ? rest : rest.slice(0, next);
 }

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
+import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/solid";
 import { createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -73,6 +73,7 @@ import {
 } from "../domain/pendingActions.js";
 import {
   applyAddProjectBrowseBackspace,
+  appendComposerText,
   appendAddProjectBrowseQuery,
   appendPaletteQuery,
   canAppendComposerAttachment,
@@ -147,6 +148,7 @@ const COMPOSER_TEXTAREA_MIN_HEIGHT = 3;
 const COMPOSER_TEXTAREA_MAX_HEIGHT = 8;
 const COMPOSER_PENDING_TEXTAREA_MIN_HEIGHT = 2;
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
+const PASTE_DECODER = new TextDecoder();
 
 type LandingFocusArea = "projects" | "threads" | "timeline" | "composer" | "controls";
 type DraftControlContext = {
@@ -920,6 +922,58 @@ export function App(props: {
       updateDraft(composerText() + key.sequence);
     }
   });
+
+  usePaste((event) => {
+    event.preventDefault();
+    handlePastedText(PASTE_DECODER.decode(event.bytes));
+  });
+
+  function handlePastedText(text: string): void {
+    if (text.length === 0) return;
+    if (visiblePanel() === "palette") {
+      if (paletteMode() === "add-project-browse") {
+        setAddProjectBrowseHighlightedItemValue(null);
+        setAddProjectBrowseWindowStart(0);
+        setAddProjectBrowseQuery((query) => appendAddProjectBrowseQuery(query, text));
+      } else if (paletteMode() === "actions") {
+        setPaletteQuery((query) => appendPaletteQuery(query, text));
+      }
+      return;
+    }
+
+    const pendingInput = activePendingUserInput();
+    const inputThread = activeThreadHeader();
+    if (pendingInput && inputThread?.id) {
+      const boundedQuestionIndex = Math.min(
+        activeQuestionIndex(),
+        Math.max(pendingInput.questions.length - 1, 0),
+      );
+      const activeQuestionId = pendingInput.questions[boundedQuestionIndex]?.id;
+      if (activeQuestionId) {
+        setCustomInputAnswers((existing) =>
+          setCustomInputAnswer(
+            existing,
+            activeQuestionId,
+            appendComposerText(existing[activeQuestionId] ?? "", text),
+          ),
+        );
+      }
+      return;
+    }
+
+    const image = parseComposerAttachmentInput(text, draftProjectId());
+    if (image && draftProjectId()) {
+      if (!canAppendComposerAttachment(draftAttachments())) {
+        setSubmitError(composerAttachmentLimitMessage());
+        return;
+      }
+      setDraftAttachments([...draftAttachments(), image.attachment]);
+      setSubmitError(`Attached ${displayText(image.sourceLabel)}`);
+      return;
+    }
+
+    updateDraft(appendComposerText(composerText(), text));
+  }
 
   function updateDraft(next: string) {
     setSubmitError(null);

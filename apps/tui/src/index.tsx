@@ -265,11 +265,6 @@ async function runInteractive(
     }
 
     try {
-    } catch (unmountError) {
-      logger.error("failed to unmount TUI root", unmountError);
-    }
-
-    try {
       renderer.destroy();
     } catch (destroyError) {
       logger.error("failed to destroy TUI renderer", destroyError);

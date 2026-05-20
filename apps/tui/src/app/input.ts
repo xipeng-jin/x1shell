@@ -62,6 +62,10 @@ export function appendAddProjectBrowseQuery(existing: string, sequence: string):
     .slice(0, MAX_ADD_PROJECT_BROWSE_QUERY_LENGTH);
 }
 
+export function appendComposerText(existing: string, sequence: string): string {
+  return sanitizeText(`${existing}${sequence}`);
+}
+
 export function applyAddProjectBrowseBackspace(query: string):
   | {
       readonly kind: "browse";
