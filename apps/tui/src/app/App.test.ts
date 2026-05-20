@@ -24,6 +24,7 @@ import {
 import { resolveCommandPaletteFrame } from "./commandPaletteFrame.js";
 
 const TUI_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const REPO_ROOT_DIR = resolve(TUI_PACKAGE_DIR, "../..");
 const HEADLESS_SMOKE_TEST_TIMEOUT_MS = 15_000;
 const HEADLESS_SMOKE_CHILD_TIMEOUT_MS = 12_000;
 const DIST_SMOKE_TEST_TIMEOUT_MS = 30_000;
@@ -57,6 +58,23 @@ describe("resolveCommandPaletteFrame", () => {
 });
 
 describe("App headless smoke", () => {
+  it("keeps the root start:tui script pointed at source mode", () => {
+    const rootPackage = JSON.parse(readFileSync(join(REPO_ROOT_DIR, "package.json"), "utf8")) as {
+      readonly scripts?: Record<string, string>;
+    };
+    const tuiPackage = JSON.parse(readFileSync(join(TUI_PACKAGE_DIR, "package.json"), "utf8")) as {
+      readonly bin?: Record<string, string>;
+      readonly scripts?: Record<string, string>;
+    };
+    const startTui = rootPackage.scripts?.["start:tui"] ?? "";
+
+    expect(startTui).toContain("--preload @opentui/solid/preload");
+    expect(startTui).toContain("src/index.tsx");
+    expect(startTui).not.toContain("bin/x1shell.js");
+    expect(tuiPackage.scripts?.start).toBe("bun --preload @opentui/solid/preload ./dist/index.mjs");
+    expect(tuiPackage.bin?.x1shell).toBe("./bin/x1shell.js");
+  });
+
   it("lowers OpenTUI Solid TSX through the build plugin", async () => {
     const transformed = await transformSolidOpenTuiJsx(
       'const label: string = "Hello"; export const view = <box><text>{label}</text></box>;',
@@ -97,6 +115,50 @@ describe("App headless smoke", () => {
         ],
         {
           cwd: TUI_PACKAGE_DIR,
+          env: headlessSmokeEnv(dir, { X1SHELL_HEADLESS_FIXTURE: "1" }),
+          stdio: "pipe",
+          timeout: HEADLESS_SMOKE_CHILD_TIMEOUT_MS,
+        },
+      );
+
+      const frame = readFileSync(framePath, "utf8");
+      expect(frame).toContain("X1Shell");
+      expect(frame).toContain("Thread Shell Fresh");
+      expect(frame).toContain("draft");
+      expect(frame).toContain("Full access");
+    },
+    DIST_SMOKE_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "launches root start:tui from source even when ignored dist output exists",
+    () => {
+      const dir = createTempDir("x1shell-root-start-tui-");
+      const framePath = join(dir, "frame.txt");
+
+      execFileSync("bun", ["run", "tsdown"], {
+        cwd: TUI_PACKAGE_DIR,
+        stdio: "pipe",
+        timeout: DIST_SMOKE_CHILD_TIMEOUT_MS,
+      });
+      writeFileSync(
+        join(TUI_PACKAGE_DIR, "dist", "index.mjs"),
+        `throw new Error("stale dist sentinel: root start:tui must not load dist");\n`,
+        "utf8",
+      );
+
+      execFileSync(
+        "bun",
+        [
+          "start:tui",
+          "--",
+          "--headless",
+          "--headless-width=90",
+          "--headless-height=24",
+          `--headless-frame=${framePath}`,
+        ],
+        {
+          cwd: REPO_ROOT_DIR,
           env: headlessSmokeEnv(dir, { X1SHELL_HEADLESS_FIXTURE: "1" }),
           stdio: "pipe",
           timeout: HEADLESS_SMOKE_CHILD_TIMEOUT_MS,
