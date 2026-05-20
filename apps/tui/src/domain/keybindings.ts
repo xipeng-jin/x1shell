@@ -13,6 +13,7 @@ export type TuiActionId =
   | "diff.full"
   | "debug.toggle"
   | "settings.toggle"
+  | "theme.switch"
   | "model.next"
   | "runtime.next"
   | "interaction.next"
@@ -85,6 +86,7 @@ export const TUI_ACTIONS: readonly TuiActionDefinition[] = [
     [","],
     "panels",
   ),
+  action("theme.switch", "Switch theme", "Preview and select the TUI color theme.", [], "system"),
   action("model.next", "Next model", "Cycle provider model selection.", ["m"], "controls"),
   action("runtime.next", "Runtime mode", "Cycle runtime mode.", ["r"], "controls"),
   action("interaction.next", "Interaction mode", "Cycle default or plan mode.", ["i"], "controls"),

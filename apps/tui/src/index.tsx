@@ -3,10 +3,11 @@ import { dirname } from "node:path";
 import { createCliRenderer } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { render } from "@opentui/solid";
+import { createEffect, createSignal } from "solid-js";
 import { App } from "./app/App.js";
 import { TuiRuntimeApp } from "./app/TuiRuntimeApp.js";
 import { resolveCliConfig } from "./cli/config.js";
-import { readPreferences } from "./cli/preferences.js";
+import { readPreferences, writePreferences } from "./cli/preferences.js";
 import { resolveBearerAttachTarget, resolveBootstrapAttachTarget } from "./runtime/attach.js";
 import { createTuiConnectionController } from "./runtime/connection.js";
 import {
@@ -21,7 +22,7 @@ import {
   removeAddedProcessListeners,
 } from "./runtime/processListeners.js";
 import { resolveKeyboardPolicy } from "./terminal/keyboard.js";
-import { resolveTheme } from "./terminal/theme.js";
+import { resolveTheme, resolveThemeId } from "./terminal/theme.js";
 import { createServerConfigStore } from "./state/serverConfigStore.js";
 import { createOrchestrationStore } from "./state/orchestrationStore.js";
 import { createThreadDetailStore } from "./state/threadDetailStore.js";
@@ -302,13 +303,23 @@ async function runInteractive(
   });
 
   try {
-    await render(
-      () => (
+    await render(() => {
+      const initialThemeId = resolveThemeId(config.theme ?? preferences.theme);
+      const [themeId, setThemeId] = createSignal(initialThemeId);
+      let committedThemeId = initialThemeId;
+      let themeCommitSequence = 0;
+      const activeTheme = () => resolveTheme(themeId());
+
+      createEffect(() => {
+        renderer.setBackgroundColor(activeTheme().palette.canvas);
+      });
+
+      return (
         <TuiRuntimeApp
           interruptRequestToken={interruptRequestToken}
           paths={config.paths}
           launchCwd={launchCwd}
-          theme={theme}
+          theme={activeTheme()}
           serverStore={serverStore}
           orchestrationStore={orchestrationStore}
           threadDetailStore={threadDetailStore}
@@ -370,11 +381,21 @@ async function runInteractive(
             if (!controller) return Promise.reject(new Error("Not connected."));
             return controller.browseFilesystem(input);
           }}
+          onPreviewTheme={(nextThemeId) => setThemeId(nextThemeId)}
+          onCancelThemePreview={() => setThemeId(committedThemeId)}
+          onCommitTheme={async (nextThemeId) => {
+            const sequence = ++themeCommitSequence;
+            const latestPreferences = await readPreferences(config.paths);
+            if (sequence !== themeCommitSequence) return;
+            await writePreferences(config.paths, { ...latestPreferences, theme: nextThemeId });
+            if (sequence !== themeCommitSequence) return;
+            committedThemeId = nextThemeId;
+            setThemeId(nextThemeId);
+          }}
           onRequestExit={() => void shutdown(0)}
         />
-      ),
-      renderer,
-    );
+      );
+    }, renderer);
     void bootstrapConnection({
       config,
       logger,

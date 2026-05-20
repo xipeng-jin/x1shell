@@ -30,6 +30,9 @@ export function TuiRuntimeApp(props: {
   onGetFullThreadDiff?: Parameters<typeof App>[0]["onGetFullThreadDiff"];
   onRefreshVcsStatus?: Parameters<typeof App>[0]["onRefreshVcsStatus"];
   onBrowseFilesystem?: Parameters<typeof App>[0]["onBrowseFilesystem"];
+  onPreviewTheme?: Parameters<typeof App>[0]["onPreviewTheme"];
+  onCommitTheme?: Parameters<typeof App>[0]["onCommitTheme"];
+  onCancelThemePreview?: Parameters<typeof App>[0]["onCancelThemePreview"];
   onRequestExit: () => void;
 }) {
   const [serverStatus, setServerStatus] = createSignal(props.serverStore.getSnapshot());
@@ -86,6 +89,9 @@ export function TuiRuntimeApp(props: {
       {...(props.onGetFullThreadDiff ? { onGetFullThreadDiff: props.onGetFullThreadDiff } : {})}
       {...(props.onRefreshVcsStatus ? { onRefreshVcsStatus: props.onRefreshVcsStatus } : {})}
       {...(props.onBrowseFilesystem ? { onBrowseFilesystem: props.onBrowseFilesystem } : {})}
+      {...(props.onPreviewTheme ? { onPreviewTheme: props.onPreviewTheme } : {})}
+      {...(props.onCommitTheme ? { onCommitTheme: props.onCommitTheme } : {})}
+      {...(props.onCancelThemePreview ? { onCancelThemePreview: props.onCancelThemePreview } : {})}
       onRequestExit={props.onRequestExit}
     />
   );

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { useKeyboard, usePaste, useTerminalDimensions } from "@opentui/solid";
-import { createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
+import { batch, createEffect, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -87,6 +87,7 @@ import {
   buildActionPaletteView,
   buildAddProjectBrowsePaletteView,
   buildAddProjectSourcesPaletteView,
+  buildThemePaletteView,
   initialAddProjectBrowseQuery,
   type TuiPaletteItem,
   type TuiPaletteMode,
@@ -112,7 +113,7 @@ import type { TuiServerStatusSnapshot } from "../state/serverConfigStore.js";
 import type { TuiShellState } from "../state/orchestrationStore.js";
 import type { ThreadDetailState } from "../state/threadDetailStore.js";
 import { SafeMarkdown } from "../terminal/safeMarkdown.js";
-import type { TuiTheme } from "../terminal/theme.js";
+import { resolveThemeId, TUI_THEME_OPTIONS, type TuiTheme } from "../terminal/theme.js";
 import { CommandPalette } from "../ui/CommandPalette.js";
 import { DebugPanel } from "../ui/DebugPanel.js";
 import { DiffPanel } from "../ui/DiffPanel.js";
@@ -129,6 +130,7 @@ import { resolveCommandPaletteFrame } from "./commandPaletteFrame.js";
 
 const MAX_DIFF_CACHE_ENTRIES = 12;
 const BROWSE_PALETTE_STATIC_ROW_COUNT = 7;
+const THEME_PALETTE_STATIC_ROW_COUNT = 6;
 const HEADER_THREAD_TITLE_MAX_LENGTH = 44;
 const SIDEBAR_THREAD_TIMESTAMP_WIDTH = 4;
 const SIDEBAR_TREE_INDENT_WIDTH = 1;
@@ -199,6 +201,9 @@ export function App(props: {
   onRefreshVcsStatus?: (cwd: string) => Promise<VcsStatusResult>;
   onBrowseFilesystem?: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;
   debugEntries?: readonly TuiDebugEntry[];
+  onPreviewTheme?: (themeId: string) => void;
+  onCommitTheme?: (themeId: string) => Promise<unknown> | unknown;
+  onCancelThemePreview?: () => void;
   onRequestExit: () => void;
 }): JSX.Element {
   const dimensions = useTerminalDimensions();
@@ -276,6 +281,11 @@ export function App(props: {
   const [addProjectBrowseHighlightedItemValue, setAddProjectBrowseHighlightedItemValue] =
     createSignal<string | null>(null);
   const [addProjectBrowseWindowStart, setAddProjectBrowseWindowStart] = createSignal(0);
+  const [themePaletteWindowStart, setThemePaletteWindowStart] = createSignal(0);
+  const [themeInitialId, setThemeInitialId] = createSignal<string | null>(null);
+  const [themeConfirmed, setThemeConfirmed] = createSignal(false);
+  const [themeCommitPending, setThemeCommitPending] = createSignal(false);
+  const [themeCommitToken, setThemeCommitToken] = createSignal(0);
   const [paletteSelectedIndex, setPaletteSelectedIndex] = createSignal(0);
   const [diffState, setDiffState] = createSignal<{
     readonly loading: boolean;
@@ -369,6 +379,11 @@ export function App(props: {
     deriveErrorBanners({ status: status(), provider: selectedProvider() }),
   );
   const paletteActions = createMemo(() => filterPaletteActions(paletteQuery()));
+  const themePaletteOptions = createMemo(() => {
+    const normalizedQuery = paletteQuery().trim().toLowerCase();
+    if (!normalizedQuery) return TUI_THEME_OPTIONS;
+    return TUI_THEME_OPTIONS.filter((theme) => theme.name.toLowerCase().includes(normalizedQuery));
+  });
   const browseFilterQuery = createMemo(() => browseFilterQueryFromPath(addProjectBrowseQuery()));
   const browseFilteredEntries = createMemo(
     () =>
@@ -409,6 +424,15 @@ export function App(props: {
       visibleBrowseWindowStart() + browseWindowSize(),
     ),
   );
+  const themePaletteWindowSize = createMemo(() =>
+    Math.max(1, Math.min(12, paletteFrame().height - THEME_PALETTE_STATIC_ROW_COUNT)),
+  );
+  const visibleThemePaletteOptions = createMemo(() =>
+    themePaletteOptions().slice(
+      themePaletteWindowStart(),
+      themePaletteWindowStart() + themePaletteWindowSize(),
+    ),
+  );
   const paletteView = createMemo(() => {
     if (paletteMode() === "add-project-sources") return buildAddProjectSourcesPaletteView();
     if (paletteMode() === "add-project-browse") {
@@ -417,6 +441,13 @@ export function App(props: {
         items: visibleBrowsePaletteItems(),
         loading: addProjectBrowseLoading(),
         error: addProjectBrowseError(),
+      });
+    }
+    if (paletteMode() === "themes") {
+      return buildThemePaletteView({
+        themes: visibleThemePaletteOptions(),
+        selectedThemeId: themeInitialId() ?? props.theme.id,
+        query: paletteQuery(),
       });
     }
     return buildActionPaletteView({ actions: paletteActions(), query: paletteQuery() });
@@ -452,6 +483,23 @@ export function App(props: {
   createEffect((previousQuery: string | undefined) => {
     const query = paletteQuery();
     if (previousQuery === undefined || previousQuery === query) return query;
+    if (paletteMode() === "themes") {
+      const first = themePaletteOptions()[0];
+      if (query.length === 0) {
+        const restoredId = resolveThemeId(themeInitialId() ?? props.theme.id);
+        const restoredIndex = Math.max(
+          0,
+          themePaletteOptions().findIndex((theme) => theme.id === restoredId),
+        );
+        moveThemeHighlightTo(restoredIndex);
+        props.onPreviewTheme?.(restoredId);
+      } else if (first) {
+        setThemePaletteWindowStart(0);
+        setPaletteSelectedIndex(0);
+        props.onPreviewTheme?.(first.id);
+      }
+      return query;
+    }
     setPaletteSelectedIndex(0);
     return query;
   });
@@ -637,6 +685,49 @@ export function App(props: {
           setAddProjectBrowseHighlightedItemValue(null);
           setAddProjectBrowseWindowStart(0);
           setAddProjectBrowseQuery((query) => appendAddProjectBrowseQuery(query, key.sequence));
+          return;
+        }
+        return;
+      }
+      if (paletteMode() === "themes") {
+        if (key.ctrl && key.name === "p") {
+          cancelThemePalette();
+          openCommandPaletteActions();
+          return;
+        }
+        if (key.name === "up" || key.name === "down") {
+          moveThemeHighlight(key.name === "down" ? 1 : -1);
+          return;
+        }
+        if (key.name === "pageup") {
+          moveThemeHighlight(-10);
+          return;
+        }
+        if (key.name === "pagedown") {
+          moveThemeHighlight(10);
+          return;
+        }
+        if (key.name === "home") {
+          moveThemeHighlightTo(0);
+          return;
+        }
+        if (key.name === "end") {
+          moveThemeHighlightTo(themePaletteOptions().length - 1);
+          return;
+        }
+        if (key.name === "backspace") {
+          setPaletteQuery((query) => query.slice(0, -1));
+          return;
+        }
+        if (key.name === "return" || key.name === "enter") {
+          const item = paletteView().items[paletteSelectedIndex()];
+          if (item?.kind === "theme" && !themeCommitPending()) {
+            runAsyncAction(() => confirmThemeSelection(item.id));
+          }
+          return;
+        }
+        if (isPlainTextSequence(key)) {
+          setPaletteQuery((query) => appendPaletteQuery(query, key.sequence));
           return;
         }
         return;
@@ -1013,6 +1104,7 @@ export function App(props: {
   }
 
   function closePalette(): void {
+    if (paletteMode() === "themes") cancelThemePalette();
     setVisiblePanel(null);
     setPaletteIntent(null);
     setPaletteMode("actions");
@@ -1023,6 +1115,9 @@ export function App(props: {
     setAddProjectBrowseError(null);
     setAddProjectBrowseHighlightedItemValue(null);
     setAddProjectBrowseWindowStart(0);
+    setThemePaletteWindowStart(0);
+    setThemeInitialId(null);
+    setThemeConfirmed(false);
     setPaletteSelectedIndex(0);
   }
 
@@ -1036,8 +1131,39 @@ export function App(props: {
     setAddProjectBrowseError(null);
     setAddProjectBrowseHighlightedItemValue(null);
     setAddProjectBrowseWindowStart(0);
+    setThemePaletteWindowStart(0);
+    setThemeInitialId(null);
+    setThemeConfirmed(false);
     setPaletteSelectedIndex(0);
     setVisiblePanel("palette");
+  }
+
+  function openThemePalette(): void {
+    const currentId = resolveThemeId(props.theme.id);
+    const selectedAbsoluteIndex = Math.max(
+      0,
+      TUI_THEME_OPTIONS.findIndex((theme) => theme.id === currentId),
+    );
+    const nextWindowStart = Math.min(
+      selectedAbsoluteIndex,
+      Math.max(0, TUI_THEME_OPTIONS.length - themePaletteWindowSize()),
+    );
+    batch(() => {
+      setPaletteIntent(null);
+      setPaletteMode("themes");
+      setPaletteQuery("");
+      setAddProjectBrowseQuery("");
+      setAddProjectBrowseSnapshot(null);
+      setAddProjectBrowseLoading(false);
+      setAddProjectBrowseError(null);
+      setAddProjectBrowseHighlightedItemValue(null);
+      setAddProjectBrowseWindowStart(0);
+      setThemePaletteWindowStart(nextWindowStart);
+      setThemeInitialId(currentId);
+      setThemeConfirmed(false);
+      setPaletteSelectedIndex(selectedAbsoluteIndex - nextWindowStart);
+      setVisiblePanel("palette");
+    });
   }
 
   function openAddProjectPalette(): void {
@@ -1065,6 +1191,10 @@ export function App(props: {
       return;
     }
     if (item.kind === "action") {
+      if (item.id === "theme.switch") {
+        openThemePalette();
+        return;
+      }
       setVisiblePanel(null);
       setPaletteQuery("");
       runAsyncAction(() => performAction(item.id));
@@ -1072,11 +1202,74 @@ export function App(props: {
     if (item.kind === "browse-directory" || item.kind === "browse-up") {
       handleBrowseItem(item);
     }
+    if (item.kind === "theme") {
+      if (themeCommitPending()) return;
+      runAsyncAction(() => confirmThemeSelection(item.id));
+    }
   }
 
   function handlePaletteHighlight(item: TuiPaletteItem | undefined): void {
-    if (!item || (item.kind !== "browse-directory" && item.kind !== "browse-up")) return;
-    setAddProjectBrowseHighlightedItemValue(browseItemValue(item));
+    if (!item) return;
+    if (item.kind === "browse-directory" || item.kind === "browse-up") {
+      setAddProjectBrowseHighlightedItemValue(browseItemValue(item));
+      return;
+    }
+    if (item.kind === "theme") {
+      const index = themePaletteOptions().findIndex((theme) => theme.id === item.id);
+      if (index >= 0) {
+        setPaletteSelectedIndex(index - themePaletteWindowStart());
+      }
+      props.onPreviewTheme?.(item.id);
+    }
+  }
+
+  function moveThemeHighlight(direction: number): void {
+    if (themePaletteOptions().length === 0) return;
+    moveThemeHighlightTo(themePaletteWindowStart() + paletteSelectedIndex() + direction);
+  }
+
+  function moveThemeHighlightTo(index: number): void {
+    const options = themePaletteOptions();
+    if (options.length === 0) return;
+    const nextIndex = Math.max(0, Math.min(index, options.length - 1));
+    const minVisibleIndex = themePaletteWindowStart();
+    const maxVisibleIndex = themePaletteWindowStart() + themePaletteWindowSize() - 1;
+    const nextWindowStart =
+      nextIndex < minVisibleIndex
+        ? nextIndex
+        : nextIndex > maxVisibleIndex
+          ? nextIndex - themePaletteWindowSize() + 1
+          : themePaletteWindowStart();
+    setThemePaletteWindowStart(nextWindowStart);
+    setPaletteSelectedIndex(nextIndex - nextWindowStart);
+    const item = options[nextIndex];
+    if (item) props.onPreviewTheme?.(item.id);
+  }
+
+  function cancelThemePalette(): void {
+    if (!themeConfirmed()) props.onCancelThemePreview?.();
+    setThemeInitialId(null);
+    setThemeConfirmed(false);
+  }
+
+  async function confirmThemeSelection(themeId: string): Promise<void> {
+    if (themeCommitPending()) return;
+    setThemeCommitPending(true);
+    const token = themeCommitToken() + 1;
+    setThemeCommitToken(token);
+    props.onPreviewTheme?.(themeId);
+    try {
+      await props.onCommitTheme?.(themeId);
+      if (themeCommitToken() !== token) return;
+      setThemeConfirmed(true);
+      setVisiblePanel(null);
+      setPaletteMode("actions");
+      setPaletteQuery("");
+      setThemePaletteWindowStart(0);
+      setThemeInitialId(null);
+    } finally {
+      if (themeCommitToken() === token) setThemeCommitPending(false);
+    }
   }
 
   function handleBrowseItem(item: TuiBrowsePaletteItem): void {
@@ -1277,6 +1470,9 @@ export function App(props: {
         return;
       case "settings.toggle":
         setVisiblePanel(visiblePanel() === "settings" ? null : "settings");
+        return;
+      case "theme.switch":
+        openThemePalette();
         return;
       case "model.next":
         await cycleModel();
