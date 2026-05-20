@@ -60,7 +60,7 @@ async function runHeadless(
   preferences: Awaited<ReturnType<typeof readPreferences>>,
   logger: ReturnType<typeof createLogger>,
 ): Promise<void> {
-  const theme = resolveTheme(config.theme ?? preferences.theme);
+  const theme = resolveTheme(preferences.theme ?? config.theme);
   const serverStore = createServerConfigStore();
   const launchCwd = process.cwd();
   const orchestrationStore = createOrchestrationStore({ launchCwd });
@@ -239,7 +239,7 @@ async function runInteractive(
   logger: ReturnType<typeof createLogger>,
 ): Promise<void> {
   const keyboard = resolveKeyboardPolicy(process.env, preferences);
-  const theme = resolveTheme(config.theme ?? preferences.theme);
+  const theme = resolveTheme(preferences.theme ?? config.theme);
   const setup = await createInteractiveRenderer(keyboard, theme);
   const { renderer } = setup;
   let shuttingDown = false;
@@ -304,7 +304,7 @@ async function runInteractive(
 
   try {
     await render(() => {
-      const initialThemeId = resolveThemeId(config.theme ?? preferences.theme);
+      const initialThemeId = resolveThemeId(preferences.theme ?? config.theme);
       const [themeId, setThemeId] = createSignal(initialThemeId);
       let committedThemeId = initialThemeId;
       let themeCommitSequence = 0;

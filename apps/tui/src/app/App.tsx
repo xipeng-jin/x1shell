@@ -1128,6 +1128,7 @@ export function App(props: {
 
   function openCommandPaletteActions(): void {
     if (isThemeCommitBlocking()) return;
+    setSidebarOverlayOpen(false);
     setPaletteIntent(null);
     setPaletteMode("actions");
     setPaletteQuery("");
@@ -1146,6 +1147,7 @@ export function App(props: {
 
   function openThemePalette(): void {
     if (isThemeCommitBlocking()) return;
+    setSidebarOverlayOpen(false);
     const currentId = resolveThemeId(props.theme.id);
     const selectedAbsoluteIndex = Math.max(
       0,
@@ -1230,6 +1232,13 @@ export function App(props: {
         setPaletteSelectedIndex(index - themePaletteWindowStart());
       }
       props.onPreviewTheme?.(item.id);
+      return;
+    }
+    if (item.kind === "action") {
+      const index = paletteView().items.findIndex(
+        (candidate) => candidate.kind === "action" && candidate.id === item.id,
+      );
+      if (index >= 0) setPaletteSelectedIndex(index);
     }
   }
 

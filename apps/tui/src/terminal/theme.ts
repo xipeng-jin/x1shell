@@ -565,6 +565,8 @@ function makeTheme(input: {
   const markdown = markdownPaletteForOpenCodeSeed(input);
   const element = tintHex(input.panel, input.text, 0.06);
   const active = tintHex(input.panel, input.primary, 0.18);
+  const muted = ensureContrast(input.muted, input.panel);
+  const danger = ensureContrast(input.danger, input.panel);
   return {
     id: input.id,
     name: input.id,
@@ -595,11 +597,11 @@ function makeTheme(input: {
       panelMuted: element,
       border: input.border,
       text: input.text,
-      muted: input.muted,
-      subtle: input.muted,
+      muted,
+      subtle: muted,
       accent: input.accent,
       info: input.primary,
-      danger: input.danger,
+      danger,
       ...markdown,
       ...(input.id === "orng" || input.id === "lucent-orng"
         ? { selectedListItemText: "#0a0a0a" }
@@ -657,6 +659,13 @@ function contrastRatio(a: string, b: string): number {
   const lighter = Math.max(relativeLuminance(a), relativeLuminance(b));
   const darker = Math.min(relativeLuminance(a), relativeLuminance(b));
   return (lighter + 0.05) / (darker + 0.05);
+}
+
+function ensureContrast(foreground: string, background: string, minimumRatio = 3): string {
+  if (contrastRatio(foreground, background) >= minimumRatio) return foreground;
+  return contrastRatio("#0a0a0a", background) >= contrastRatio("#ffffff", background)
+    ? "#0a0a0a"
+    : "#ffffff";
 }
 
 function relativeLuminanceChannel(value: number): number {

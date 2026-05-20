@@ -53,7 +53,9 @@ export function composerAttachmentLimitMessage(): string {
 }
 
 export function appendPaletteQuery(existing: string, sequence: string): string {
-  return displayText(`${existing}${sequence}`).slice(0, MAX_PALETTE_QUERY_LENGTH);
+  return displayText(`${existing}${sequence}`)
+    .replace(/[\r\n]+/g, "")
+    .slice(0, MAX_PALETTE_QUERY_LENGTH);
 }
 
 export function appendAddProjectBrowseQuery(existing: string, sequence: string): string {

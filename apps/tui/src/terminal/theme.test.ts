@@ -59,6 +59,11 @@ describe("resolveTheme", () => {
     expect(selectedListItemForeground(resolveTheme("cobalt2"))).toBe("#0a0a0a");
   });
 
+  it("keeps generated semantic foregrounds readable on their palette surface", () => {
+    expect(resolveTheme("nord").palette.danger).toBe("#ffffff");
+    expect(resolveTheme("solarized").palette.danger).toBe("#ffffff");
+  });
+
   it("normalizes unknown theme ids to a selectable registry id", () => {
     expect(resolveThemeId(" opencode ")).toBe("opencode");
     expect(resolveThemeId("terminal-match")).toBe("system");

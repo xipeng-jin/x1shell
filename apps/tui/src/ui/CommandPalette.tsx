@@ -124,6 +124,8 @@ export function CommandPalette(props: {
                     title: item.title,
                     footer: formatActionKeys(item.action),
                     colors: colors(),
+                    onMouseOver: () => props.onHighlightItem?.(item),
+                    onMouseDown: () => props.onSelectItem?.(item),
                   })
                 : null,
             )}
