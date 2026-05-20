@@ -606,6 +606,7 @@ export function App(props: {
       return;
     }
     if (visiblePanel() === "palette") {
+      if (isThemeCommitBlocking()) return;
       if (key.name === "escape") {
         closePalette();
         return;
@@ -1104,6 +1105,7 @@ export function App(props: {
   }
 
   function closePalette(): void {
+    if (isThemeCommitBlocking()) return;
     if (paletteMode() === "themes") cancelThemePalette();
     setVisiblePanel(null);
     setPaletteIntent(null);
@@ -1122,6 +1124,7 @@ export function App(props: {
   }
 
   function openCommandPaletteActions(): void {
+    if (isThemeCommitBlocking()) return;
     setPaletteIntent(null);
     setPaletteMode("actions");
     setPaletteQuery("");
@@ -1139,6 +1142,7 @@ export function App(props: {
   }
 
   function openThemePalette(): void {
+    if (isThemeCommitBlocking()) return;
     const currentId = resolveThemeId(props.theme.id);
     const selectedAbsoluteIndex = Math.max(
       0,
@@ -1167,6 +1171,7 @@ export function App(props: {
   }
 
   function openAddProjectPalette(): void {
+    if (isThemeCommitBlocking()) return;
     setFocusArea("timeline");
     setSidebarOverlayOpen(false);
     setVisiblePanel("palette");
@@ -1174,6 +1179,7 @@ export function App(props: {
   }
 
   function handlePaletteItem(item: TuiPaletteItem | undefined): void {
+    if (isThemeCommitBlocking()) return;
     if (!item) return;
     if (item.kind === "add-project-source" && item.source === "local") {
       setPaletteMode("add-project-browse");
@@ -1209,6 +1215,7 @@ export function App(props: {
   }
 
   function handlePaletteHighlight(item: TuiPaletteItem | undefined): void {
+    if (isThemeCommitBlocking()) return;
     if (!item) return;
     if (item.kind === "browse-directory" || item.kind === "browse-up") {
       setAddProjectBrowseHighlightedItemValue(browseItemValue(item));
@@ -1270,6 +1277,10 @@ export function App(props: {
     } finally {
       if (themeCommitToken() === token) setThemeCommitPending(false);
     }
+  }
+
+  function isThemeCommitBlocking(): boolean {
+    return visiblePanel() === "palette" && paletteMode() === "themes" && themeCommitPending();
   }
 
   function handleBrowseItem(item: TuiBrowsePaletteItem): void {
@@ -1406,6 +1417,7 @@ export function App(props: {
   }
 
   async function performAction(actionId: TuiActionId) {
+    if (isThemeCommitBlocking()) return;
     switch (actionId) {
       case "palette.open":
         openCommandPaletteActions();
@@ -1702,11 +1714,13 @@ export function App(props: {
             setSidebarOverlayOpen(false);
           }}
           onOpenSettings={() => {
+            if (isThemeCommitBlocking()) return;
             setVisiblePanel("settings");
             setFocusArea("timeline");
             setSidebarOverlayOpen(false);
           }}
           onOpenKeybindings={() => {
+            if (isThemeCommitBlocking()) return;
             setVisiblePanel("help");
             setFocusArea("timeline");
             setSidebarOverlayOpen(false);
