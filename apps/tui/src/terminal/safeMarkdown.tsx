@@ -1,4 +1,4 @@
-import type React from "react";
+import { createMemo, type JSX } from "solid-js";
 import { createSafeTextStream, sanitizeText } from "./safeTextStream.js";
 
 export interface SafeMarkdownSnapshot {
@@ -38,135 +38,131 @@ export function renderSafeMarkdown(markdown: string): string {
   return neutralizeBareUrls(neutralizeMarkdownLinks(sanitized));
 }
 
-export function SafeMarkdown(props: { content: string; fg?: string }): React.ReactNode {
-  const content = renderSafeMarkdown(props.content);
+export function SafeMarkdown(props: { content: string; fg?: string }): JSX.Element {
+  const content = createMemo(() => renderSafeMarkdown(props.content));
   return props.fg === undefined ? (
-    <SafeMarkdownBlocks content={content} />
+    <SafeMarkdownBlocks content={content()} />
   ) : (
-    <SafeMarkdownBlocks content={content} fg={props.fg} />
+    <SafeMarkdownBlocks content={content()} fg={props.fg} />
   );
 }
 
-function SafeMarkdownBlocks(props: { content: string; fg?: string }): React.ReactNode {
+function SafeMarkdownBlocks(props: { content: string; fg?: string }): JSX.Element {
   const fg = props.fg ?? "#ffffff";
   const muted = props.fg ?? "#a3a3a3";
-  const lines = props.content.replace(/\r\n?/g, "\n").split("\n");
-  const nodes: React.ReactNode[] = [];
-  let index = 0;
+  const nodes = createMemo(() => {
+    const lines = props.content.replace(/\r\n?/g, "\n").split("\n");
+    const nodes: JSX.Element[] = [];
+    let index = 0;
 
-  while (index < lines.length) {
-    const line = lines[index] ?? "";
-    const fence = line.match(/^\s*```/);
-    if (fence) {
-      const codeLines: string[] = [];
-      index += 1;
-      while (index < lines.length && !/^\s*```/.test(lines[index] ?? "")) {
-        codeLines.push(lines[index] ?? "");
+    while (index < lines.length) {
+      const line = lines[index] ?? "";
+      const fence = line.match(/^\s*```/);
+      if (fence) {
+        const codeLines: string[] = [];
         index += 1;
+        while (index < lines.length && !/^\s*```/.test(lines[index] ?? "")) {
+          codeLines.push(lines[index] ?? "");
+          index += 1;
+        }
+        if (index < lines.length) index += 1;
+        nodes.push(
+          <box
+            border={["left"]}
+            borderColor={muted}
+            paddingLeft={1}
+            marginTop={nodes.length === 0 ? 0 : 1}
+            flexDirection="column"
+          >
+            {keyedLines(codeLines.length === 0 ? [""] : codeLines, "code").map(({ line }) => (
+              <text fg={fg} wrapMode="char">
+                {line}
+              </text>
+            ))}
+          </box>,
+        );
+        continue;
       }
-      if (index < lines.length) index += 1;
-      nodes.push(
-        <box
-          key={`code:${index}:${nodes.length}`}
-          border={["left"]}
-          borderColor={muted}
-          paddingLeft={1}
-          marginTop={nodes.length === 0 ? 0 : 1}
-          flexDirection="column"
-        >
-          {keyedLines(codeLines.length === 0 ? [""] : codeLines, "code").map(({ key, line }) => (
-            <text key={key} fg={fg} wrapMode="char">
-              {line}
-            </text>
-          ))}
-        </box>,
-      );
-      continue;
-    }
 
-    if (line.trim() === "") {
-      index += 1;
-      continue;
-    }
+      if (line.trim() === "") {
+        index += 1;
+        continue;
+      }
 
-    const heading = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
-    if (heading) {
+      const heading = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
+      if (heading) {
+        nodes.push(
+          <text fg={fg} wrapMode="word" marginTop={nodes.length === 0 ? 0 : 1}>
+            <strong>{renderInlineMarkdown(heading[2] ?? "", fg)}</strong>
+          </text>,
+        );
+        index += 1;
+        continue;
+      }
+
+      const blockquote = line.match(/^\s{0,3}>\s?(.*)$/);
+      if (blockquote) {
+        const quoteLines = [blockquote[1] ?? ""];
+        index += 1;
+        while (index < lines.length) {
+          const next = (lines[index] ?? "").match(/^\s{0,3}>\s?(.*)$/);
+          if (!next) break;
+          quoteLines.push(next[1] ?? "");
+          index += 1;
+        }
+        nodes.push(
+          <box
+            border={["left"]}
+            borderColor={muted}
+            paddingLeft={1}
+            marginTop={nodes.length === 0 ? 0 : 1}
+            flexDirection="column"
+          >
+            {keyedLines(quoteLines, "quote").map(({ line }) => (
+              <text fg={muted} wrapMode="word">
+                <em>{renderInlineMarkdown(line, muted)}</em>
+              </text>
+            ))}
+          </box>,
+        );
+        continue;
+      }
+
+      const list = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+      if (list) {
+        const indent = Math.min(Math.floor((list[1]?.length ?? 0) / 2), 4);
+        const marker = list[2]?.match(/^\d/) ? `${list[2]} ` : "•  ";
+        nodes.push(
+          <box flexDirection="row" marginLeft={indent * 2}>
+            <box width={Math.max(3, marker.length)} flexShrink={0}>
+              <text fg={muted}>{marker}</text>
+            </box>
+            <box flexGrow={1} minWidth={0}>
+              <text fg={fg} wrapMode="word">
+                {renderInlineMarkdown(list[3] ?? "", fg)}
+              </text>
+            </box>
+          </box>,
+        );
+        index += 1;
+        continue;
+      }
+
       nodes.push(
-        <text
-          key={`heading:${index}`}
-          fg={fg}
-          wrapMode="word"
-          marginTop={nodes.length === 0 ? 0 : 1}
-        >
-          <strong>{renderInlineMarkdown(heading[2] ?? "", fg)}</strong>
+        <text fg={fg} wrapMode="word">
+          {renderInlineMarkdown(line, fg)}
         </text>,
       );
       index += 1;
-      continue;
     }
 
-    const blockquote = line.match(/^\s{0,3}>\s?(.*)$/);
-    if (blockquote) {
-      const quoteLines = [blockquote[1] ?? ""];
-      index += 1;
-      while (index < lines.length) {
-        const next = (lines[index] ?? "").match(/^\s{0,3}>\s?(.*)$/);
-        if (!next) break;
-        quoteLines.push(next[1] ?? "");
-        index += 1;
-      }
-      nodes.push(
-        <box
-          key={`quote:${index}:${nodes.length}`}
-          border={["left"]}
-          borderColor={muted}
-          paddingLeft={1}
-          marginTop={nodes.length === 0 ? 0 : 1}
-          flexDirection="column"
-        >
-          {keyedLines(quoteLines, "quote").map(({ key, line }) => (
-            <text key={key} fg={muted} wrapMode="word">
-              <em>{renderInlineMarkdown(line, muted)}</em>
-            </text>
-          ))}
-        </box>,
-      );
-      continue;
-    }
+    return nodes;
+  });
 
-    const list = line.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
-    if (list) {
-      const indent = Math.min(Math.floor((list[1]?.length ?? 0) / 2), 4);
-      const marker = list[2]?.match(/^\d/) ? `${list[2]} ` : "•  ";
-      nodes.push(
-        <box key={`list:${index}`} flexDirection="row" marginLeft={indent * 2}>
-          <box width={Math.max(3, marker.length)} flexShrink={0}>
-            <text fg={muted}>{marker}</text>
-          </box>
-          <box flexGrow={1} minWidth={0}>
-            <text fg={fg} wrapMode="word">
-              {renderInlineMarkdown(list[3] ?? "", fg)}
-            </text>
-          </box>
-        </box>,
-      );
-      index += 1;
-      continue;
-    }
-
-    nodes.push(
-      <text key={`text:${index}`} fg={fg} wrapMode="word">
-        {renderInlineMarkdown(line, fg)}
-      </text>,
-    );
-    index += 1;
-  }
-
-  return <box flexDirection="column">{nodes}</box>;
+  return <box flexDirection="column">{nodes()}</box>;
 }
-
-function renderInlineMarkdown(value: string, fg: string): React.ReactNode[] {
-  const nodes: React.ReactNode[] = [];
+function renderInlineMarkdown(value: string, fg: string): JSX.Element[] {
+  const nodes: JSX.Element[] = [];
   const pattern =
     /(`[^`]+`|\*\*[^*]+\*\*|(?<![A-Za-z0-9])__[^_\s][^_]*?__(?![A-Za-z0-9])|\*[^*]+\*|(?<![A-Za-z0-9])_[^_\s][^_]*?_(?![A-Za-z0-9]))/g;
   let lastIndex = 0;
@@ -175,17 +171,12 @@ function renderInlineMarkdown(value: string, fg: string): React.ReactNode[] {
   while ((match = pattern.exec(value)) !== null) {
     if (match.index > lastIndex) nodes.push(value.slice(lastIndex, match.index));
     const token = match[0];
-    const key = `${match.index}:${token.length}`;
     if (token.startsWith("`")) {
-      nodes.push(
-        <span key={key} style={{ fg }}>
-          {token.slice(1, -1)}
-        </span>,
-      );
+      nodes.push(<span style={{ fg }}>{token.slice(1, -1)}</span>);
     } else if (token.startsWith("**") || token.startsWith("__")) {
-      nodes.push(<strong key={key}>{token.slice(2, -2)}</strong>);
+      nodes.push(<strong>{token.slice(2, -2)}</strong>);
     } else {
-      nodes.push(<em key={key}>{token.slice(1, -1)}</em>);
+      nodes.push(<em>{token.slice(1, -1)}</em>);
     }
     lastIndex = pattern.lastIndex;
   }

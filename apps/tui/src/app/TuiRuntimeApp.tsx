@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { createSignal, onCleanup } from "solid-js";
 import type { ProjectId, ThreadId } from "@t3tools/contracts";
 import { App } from "./App.js";
 import type { TuiPaths } from "../cli/config.js";
@@ -32,26 +32,24 @@ export function TuiRuntimeApp(props: {
   onBrowseFilesystem?: Parameters<typeof App>[0]["onBrowseFilesystem"];
   onRequestExit: () => void;
 }) {
-  const serverStatus = useSyncExternalStore(
-    props.serverStore.subscribe,
-    props.serverStore.getSnapshot,
-    props.serverStore.getSnapshot,
+  const [serverStatus, setServerStatus] = createSignal(props.serverStore.getSnapshot());
+  const [shellState, setShellState] = createSignal(props.orchestrationStore.getSnapshot());
+  const [threadDetailState, setThreadDetailState] = createSignal(
+    props.threadDetailStore.getSnapshot(),
   );
-  const shellState = useSyncExternalStore(
-    props.orchestrationStore.subscribe,
-    props.orchestrationStore.getSnapshot,
-    props.orchestrationStore.getSnapshot,
-  );
-  const threadDetailState = useSyncExternalStore(
-    props.threadDetailStore.subscribe,
-    props.threadDetailStore.getSnapshot,
-    props.threadDetailStore.getSnapshot,
-  );
-  const debugEntries = useSyncExternalStore(
-    props.debugBuffer.subscribe,
-    props.debugBuffer.getSnapshot,
-    props.debugBuffer.getSnapshot,
-  );
+  const [debugEntries, setDebugEntries] = createSignal(props.debugBuffer.getSnapshot());
+
+  const unsubscribers = [
+    props.serverStore.subscribe(() => setServerStatus(props.serverStore.getSnapshot())),
+    props.orchestrationStore.subscribe(() => setShellState(props.orchestrationStore.getSnapshot())),
+    props.threadDetailStore.subscribe(() =>
+      setThreadDetailState(props.threadDetailStore.getSnapshot()),
+    ),
+    props.debugBuffer.subscribe(() => setDebugEntries(props.debugBuffer.getSnapshot())),
+  ];
+  onCleanup(() => {
+    for (const unsubscribe of unsubscribers) unsubscribe();
+  });
 
   return (
     <App
@@ -59,10 +57,10 @@ export function TuiRuntimeApp(props: {
       paths={props.paths}
       launchCwd={props.launchCwd}
       theme={props.theme}
-      serverStatus={serverStatus}
-      shellState={shellState}
-      threadDetailState={threadDetailState}
-      debugEntries={debugEntries}
+      serverStatus={serverStatus()}
+      shellState={shellState()}
+      threadDetailState={threadDetailState()}
+      debugEntries={debugEntries()}
       onSelectProject={(projectId) => props.onSelectProject?.(projectId)}
       onSelectThread={(threadId) => props.onSelectThread?.(threadId)}
       onCreateProjectDraft={(projectId) => props.onCreateProjectDraft?.(projectId)}

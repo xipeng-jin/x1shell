@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { createCliRenderer } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
-import { createRoot } from "@opentui/react";
+import { render } from "@opentui/solid";
 import { App } from "./app/App.js";
 import { TuiRuntimeApp } from "./app/TuiRuntimeApp.js";
 import { resolveCliConfig } from "./cli/config.js";
@@ -84,7 +84,6 @@ async function runHeadless(
     serverStore.setConnection("error", safeOutputUnknown(error));
   });
   let setup: Awaited<ReturnType<typeof createTestRenderer>> | undefined;
-  let root: ReturnType<typeof createRoot> | undefined;
 
   try {
     setup = await createTestRenderer({
@@ -96,18 +95,20 @@ async function runHeadless(
       backgroundColor: theme.palette.canvas,
       useKittyKeyboard: { events: true },
     });
-    root = createRoot(setup.renderer);
-    root.render(
-      <App
-        interruptRequestToken={0}
-        paths={config.paths}
-        launchCwd={launchCwd}
-        theme={theme}
-        serverStatus={serverStore.getSnapshot()}
-        shellState={orchestrationStore.getSnapshot()}
-        threadDetailState={threadDetailStore.getSnapshot()}
-        onRequestExit={() => {}}
-      />,
+    await render(
+      () => (
+        <App
+          interruptRequestToken={0}
+          paths={config.paths}
+          launchCwd={launchCwd}
+          theme={theme}
+          serverStatus={serverStore.getSnapshot()}
+          shellState={orchestrationStore.getSnapshot()}
+          threadDetailState={threadDetailStore.getSnapshot()}
+          onRequestExit={() => {}}
+        />
+      ),
+      setup.renderer,
     );
     await wait(config.headless.settleMs);
     await setup.renderOnce();
@@ -119,7 +120,6 @@ async function runHeadless(
     unsubscribeRestart?.();
     await controller?.dispose();
     await localSupervisor?.stop();
-    root?.unmount();
     setup?.renderer.destroy();
   }
 }
@@ -240,7 +240,7 @@ async function runInteractive(
   const keyboard = resolveKeyboardPolicy(process.env, preferences);
   const theme = resolveTheme(config.theme ?? preferences.theme);
   const setup = await createInteractiveRenderer(keyboard, theme);
-  const { renderer, root } = setup;
+  const { renderer } = setup;
   let shuttingDown = false;
   const interruptRequestToken = 0;
   const serverStore = createServerConfigStore();
@@ -262,12 +262,6 @@ async function runInteractive(
       await localSupervisor?.stop();
     } catch (disposeError) {
       logger.error("failed to dispose TUI connection", disposeError);
-    }
-
-    try {
-      root.unmount();
-    } catch (unmountError) {
-      logger.error("failed to unmount TUI root", unmountError);
     }
 
     try {
@@ -308,75 +302,78 @@ async function runInteractive(
   });
 
   try {
-    root.render(
-      <TuiRuntimeApp
-        interruptRequestToken={interruptRequestToken}
-        paths={config.paths}
-        launchCwd={launchCwd}
-        theme={theme}
-        serverStore={serverStore}
-        orchestrationStore={orchestrationStore}
-        threadDetailStore={threadDetailStore}
-        debugBuffer={debugBuffer}
-        onSelectProject={(projectId) => {
-          orchestrationStore.selectProject(projectId);
-          controller?.setActiveThread(null);
-        }}
-        onSelectThread={(threadId) => {
-          orchestrationStore.selectThread(threadId);
-          controller?.setActiveThread(threadId);
-        }}
-        onCreateProjectDraft={(projectId) => {
-          orchestrationStore.createProjectDraft(projectId);
-          controller?.setActiveThread(null);
-        }}
-        onCreatePendingProjectDraft={(input) => {
-          orchestrationStore.createPendingProjectDraft(input);
-          controller?.setActiveThread(null);
-        }}
-        onSelectNextThread={(direction) => {
-          orchestrationStore.selectNextThread(direction);
-          controller?.setActiveThread(orchestrationStore.getSnapshot().selectedThreadId);
-        }}
-        onNewThread={() => {
-          orchestrationStore.createProjectDraft();
-          controller?.setActiveThread(null);
-        }}
-        onSubmitCommand={(command) => {
-          if (!controller) return Promise.reject(new Error("Not connected."));
-          debugBuffer.push("info", "dispatch command", { type: command.type });
-          return controller.dispatchCommand(command);
-        }}
-        onReconnect={async () => {
-          debugBuffer.push("info", "manual reconnect");
-          await controller?.reconnect();
-        }}
-        onRefreshProviders={async () => {
-          debugBuffer.push("info", "refresh providers");
-          await controller?.refreshProviders();
-        }}
-        onGetTurnDiff={(input) => {
-          debugBuffer.push("info", "load turn diff", input);
-          if (!controller) return Promise.reject(new Error("Not connected."));
-          return controller.getTurnDiff(input);
-        }}
-        onGetFullThreadDiff={(input) => {
-          debugBuffer.push("info", "load full thread diff", input);
-          if (!controller) return Promise.reject(new Error("Not connected."));
-          return controller.getFullThreadDiff(input);
-        }}
-        onRefreshVcsStatus={(cwd) => {
-          debugBuffer.push("info", "refresh vcs status", { cwd });
-          if (!controller) return Promise.reject(new Error("Not connected."));
-          return controller.refreshVcsStatus(cwd);
-        }}
-        onBrowseFilesystem={(input) => {
-          debugBuffer.push("info", "browse filesystem", { partialPath: input.partialPath });
-          if (!controller) return Promise.reject(new Error("Not connected."));
-          return controller.browseFilesystem(input);
-        }}
-        onRequestExit={() => void shutdown(0)}
-      />,
+    await render(
+      () => (
+        <TuiRuntimeApp
+          interruptRequestToken={interruptRequestToken}
+          paths={config.paths}
+          launchCwd={launchCwd}
+          theme={theme}
+          serverStore={serverStore}
+          orchestrationStore={orchestrationStore}
+          threadDetailStore={threadDetailStore}
+          debugBuffer={debugBuffer}
+          onSelectProject={(projectId) => {
+            orchestrationStore.selectProject(projectId);
+            controller?.setActiveThread(null);
+          }}
+          onSelectThread={(threadId) => {
+            orchestrationStore.selectThread(threadId);
+            controller?.setActiveThread(threadId);
+          }}
+          onCreateProjectDraft={(projectId) => {
+            orchestrationStore.createProjectDraft(projectId);
+            controller?.setActiveThread(null);
+          }}
+          onCreatePendingProjectDraft={(input) => {
+            orchestrationStore.createPendingProjectDraft(input);
+            controller?.setActiveThread(null);
+          }}
+          onSelectNextThread={(direction) => {
+            orchestrationStore.selectNextThread(direction);
+            controller?.setActiveThread(orchestrationStore.getSnapshot().selectedThreadId);
+          }}
+          onNewThread={() => {
+            orchestrationStore.createProjectDraft();
+            controller?.setActiveThread(null);
+          }}
+          onSubmitCommand={(command) => {
+            if (!controller) return Promise.reject(new Error("Not connected."));
+            debugBuffer.push("info", "dispatch command", { type: command.type });
+            return controller.dispatchCommand(command);
+          }}
+          onReconnect={async () => {
+            debugBuffer.push("info", "manual reconnect");
+            await controller?.reconnect();
+          }}
+          onRefreshProviders={async () => {
+            debugBuffer.push("info", "refresh providers");
+            await controller?.refreshProviders();
+          }}
+          onGetTurnDiff={(input) => {
+            debugBuffer.push("info", "load turn diff", input);
+            if (!controller) return Promise.reject(new Error("Not connected."));
+            return controller.getTurnDiff(input);
+          }}
+          onGetFullThreadDiff={(input) => {
+            debugBuffer.push("info", "load full thread diff", input);
+            if (!controller) return Promise.reject(new Error("Not connected."));
+            return controller.getFullThreadDiff(input);
+          }}
+          onRefreshVcsStatus={(cwd) => {
+            debugBuffer.push("info", "refresh vcs status", { cwd });
+            if (!controller) return Promise.reject(new Error("Not connected."));
+            return controller.refreshVcsStatus(cwd);
+          }}
+          onBrowseFilesystem={(input) => {
+            debugBuffer.push("info", "browse filesystem", { partialPath: input.partialPath });
+            if (!controller) return Promise.reject(new Error("Not connected."));
+            return controller.browseFilesystem(input);
+          }}
+          onRequestExit={() => void shutdown(0)}
+        />
+      ),
+      renderer,
     );
     void bootstrapConnection({
       config,
@@ -397,7 +394,6 @@ async function runInteractive(
       isShuttingDown: () => shuttingDown,
     });
   } catch (error) {
-    root.unmount();
     renderer.destroy();
     throw error;
   }
@@ -579,8 +575,7 @@ async function createInteractiveRenderer(
   removeAddedProcessListeners(existingErrorListeners);
 
   try {
-    const root = createRoot(renderer);
-    return { renderer, root };
+    return { renderer };
   } catch (error) {
     renderer.destroy();
     throw error;

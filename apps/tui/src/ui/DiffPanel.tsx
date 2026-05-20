@@ -1,4 +1,4 @@
-import type React from "react";
+import { createMemo, type JSX } from "solid-js";
 import type { TuiTheme } from "../terminal/theme.js";
 
 export function DiffPanel(props: {
@@ -7,8 +7,10 @@ export function DiffPanel(props: {
   readonly loading?: boolean;
   readonly error?: string | null;
   readonly theme: TuiTheme;
-}): React.ReactNode {
-  const renderedLines = props.text.split("\n").slice(0, 16).map(diffLineWithUniqueKey());
+}): JSX.Element {
+  const renderedLines = createMemo(() =>
+    props.text.split("\n").slice(0, 16).map(diffLineWithUniqueKey()),
+  );
 
   return (
     <box border borderColor={props.theme.palette.border} paddingLeft={1} flexDirection="column">
@@ -17,10 +19,8 @@ export function DiffPanel(props: {
       </text>
       {props.loading ? <text fg={props.theme.palette.muted}>Loading diff...</text> : null}
       {props.error ? <text fg={props.theme.palette.danger}>{props.error}</text> : null}
-      {renderedLines.map(({ key, line }) => (
-        <text key={key} fg={props.theme.palette.text}>
-          {line}
-        </text>
+      {renderedLines().map(({ line }) => (
+        <text fg={props.theme.palette.text}>{line}</text>
       ))}
     </box>
   );

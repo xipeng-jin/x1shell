@@ -8,6 +8,7 @@
   },
   "files": [
     "README.md",
+    "bunfig.toml",
     "bin",
     "dist"
   ],
@@ -19,25 +20,27 @@
     "dev": "bun run src/index.tsx",
     "dev:headless": "X1SHELL_HEADLESS=1 bun run src/index.tsx",
     "build": "bun run --filter t3 build && tsdown && node scripts/copy-server-dist.mjs",
-    "start": "bun dist/index.mjs",
+    "start": "bun --preload @opentui/solid/preload ./dist/index.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests --root ."
   },
   "dependencies": {
     "@opentui/core": "0.2.7",
-    "@opentui/react": "0.2.7",
-    "react": "^19.0.0",
+    "@opentui/solid": "0.2.7",
+    "solid-js": "1.9.12",
     "web-tree-sitter": "0.25.10",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@babel/core": "7.28.0",
+    "@babel/preset-typescript": "7.27.1",
     "@t3tools/client-runtime": "workspace:*",
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
-    "@types/react": "^19.0.0",
     "@types/ws": "^8.18.1",
+    "babel-preset-solid": "1.9.12",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

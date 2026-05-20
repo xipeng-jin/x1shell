@@ -21,5 +21,13 @@
     "eslint/no-await-in-loop": "off",
     "eslint/no-underscore-dangle": "off",
     "t3code/no-inline-schema-compile": "warn"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["apps/tui/**/*.tsx"],
+      "rules": {
+        "react/jsx-key": "off"
+      }
+    }
+  ]
 }
