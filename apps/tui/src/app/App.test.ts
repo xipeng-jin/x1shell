@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -58,7 +58,7 @@ describe("resolveCommandPaletteFrame", () => {
 });
 
 describe("App headless smoke", () => {
-  it("keeps the root start:tui script pointed at source mode", () => {
+  it("keeps the root TUI scripts pointed at source mode without forcing cwd", () => {
     const rootPackage = JSON.parse(readFileSync(join(REPO_ROOT_DIR, "package.json"), "utf8")) as {
       readonly scripts?: Record<string, string>;
     };
@@ -67,9 +67,19 @@ describe("App headless smoke", () => {
       readonly scripts?: Record<string, string>;
     };
     const startTui = rootPackage.scripts?.["start:tui"] ?? "";
+    const rootTuiScripts = [
+      rootPackage.scripts?.["dev:tui"] ?? "",
+      rootPackage.scripts?.["dev:tui:headless"] ?? "",
+      startTui,
+    ];
 
-    expect(startTui).toContain("--preload @opentui/solid/preload");
-    expect(startTui).toContain("src/index.tsx");
+    for (const script of rootTuiScripts) {
+      expect(script).toContain(
+        "--preload ./apps/tui/node_modules/@opentui/solid/scripts/preload.ts",
+      );
+      expect(script).toContain("apps/tui/src/index.tsx");
+      expect(script).not.toContain("--cwd apps/tui");
+    }
     expect(startTui).not.toContain("bin/x1shell.js");
     expect(tuiPackage.scripts?.start).toBe("bun --preload @opentui/solid/preload ./dist/index.mjs");
     expect(tuiPackage.bin?.x1shell).toBe("./bin/x1shell.js");
@@ -186,6 +196,48 @@ describe("App headless smoke", () => {
       expect(frame).toContain("Full access");
     },
     DIST_SMOKE_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "preserves the repo cwd when launching root start:tui",
+    () => {
+      const dir = createTempDir("x1shell-root-start-tui-cwd-");
+      const workspaceDir = join(dir, "root-workspace");
+      const framePath = join(dir, "frame.txt");
+      const rootPackage = JSON.parse(readFileSync(join(REPO_ROOT_DIR, "package.json"), "utf8")) as {
+        readonly scripts?: Record<string, string>;
+      };
+      mkdirSync(workspaceDir, { recursive: true });
+      symlinkSync(join(REPO_ROOT_DIR, "apps"), join(workspaceDir, "apps"), "dir");
+      writeFileSync(
+        join(workspaceDir, "package.json"),
+        `${JSON.stringify({ scripts: { "start:tui": rootPackage.scripts?.["start:tui"] } })}\n`,
+        "utf8",
+      );
+
+      execFileSync(
+        "bun",
+        [
+          "start:tui",
+          "--",
+          "--headless",
+          "--headless-width=90",
+          "--headless-height=24",
+          `--headless-frame=${framePath}`,
+        ],
+        {
+          cwd: workspaceDir,
+          env: headlessSmokeEnv(dir, {}),
+          stdio: "pipe",
+          timeout: HEADLESS_SMOKE_CHILD_TIMEOUT_MS,
+        },
+      );
+
+      const frame = readFileSync(framePath, "utf8");
+      expect(frame).toContain("New thread [root-workspace]");
+      expect(frame).not.toContain("New thread [tui]");
+    },
+    HEADLESS_SMOKE_TEST_TIMEOUT_MS,
   );
 
   it(
