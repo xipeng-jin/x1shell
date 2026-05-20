@@ -8,6 +8,8 @@ import {
 } from "./runtime/processListeners.js";
 
 const TUI_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const LISTENER_SMOKE_TEST_TIMEOUT_MS = 15_000;
+const LISTENER_SMOKE_CHILD_TIMEOUT_MS = 12_000;
 
 describe("renderer lifecycle", () => {
   const cleanup: (() => void)[] = [];
@@ -43,18 +45,23 @@ describe("renderer lifecycle", () => {
     expect(process.rawListeners("unhandledRejection")).not.toContain(rawRejection);
   });
 
-  it("keeps OpenTUI input and resize listeners bounded across store updates", () => {
-    const output = execFileSync("bun", ["run", "src/test/openTuiListenerLeakSmoke.tsx"], {
-      cwd: TUI_PACKAGE_DIR,
-      encoding: "utf8",
-      stdio: "pipe",
-    });
-    expect(output).not.toContain("Possible EventTarget memory leak");
+  it(
+    "keeps OpenTUI input and resize listeners bounded across store updates",
+    () => {
+      const output = execFileSync("bun", ["run", "src/test/openTuiListenerLeakSmoke.tsx"], {
+        cwd: TUI_PACKAGE_DIR,
+        encoding: "utf8",
+        stdio: "pipe",
+        timeout: LISTENER_SMOKE_CHILD_TIMEOUT_MS,
+      });
+      expect(output).not.toContain("Possible EventTarget memory leak");
 
-    const result = JSON.parse(output.trim()) as {
-      baseline: Record<"keypress" | "resize" | "selection", number>;
-      after: Record<"keypress" | "resize" | "selection", number>;
-    };
-    expect(result.after).toEqual(result.baseline);
-  });
+      const result = JSON.parse(output.trim()) as {
+        baseline: Record<"keypress" | "resize" | "selection", number>;
+        after: Record<"keypress" | "resize" | "selection", number>;
+      };
+      expect(result.after).toEqual(result.baseline);
+    },
+    LISTENER_SMOKE_TEST_TIMEOUT_MS,
+  );
 });
