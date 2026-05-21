@@ -514,6 +514,8 @@ describe("App headless smoke", () => {
     expect(query).not.toContain("\u001b]8");
     expect(query).not.toContain("evil.example");
     expect(query).not.toContain("palette-secret");
+    expect(appendPaletteQuery("", "opencode\n")).toBe("opencode");
+    expect(appendPaletteQuery("open", "\rtheme")).toBe("opentheme");
 
     const hugeDataUrl = `data:image/png;base64,${"A".repeat(10_000)}`;
     expect(appendPaletteQuery("", hugeDataUrl)).toHaveLength(160);

@@ -6,6 +6,7 @@ import {
   buildActionPaletteView,
   buildAddProjectBrowsePaletteView,
   buildAddProjectSourcesPaletteView,
+  buildThemePaletteView,
 } from "../app/paletteViewModel.js";
 import { resolveTheme } from "../terminal/theme.js";
 import { CommandPalette } from "../ui/CommandPalette.js";
@@ -54,6 +55,16 @@ await capture(
   buildAddProjectBrowsePaletteView({
     query: "~/Code/token=secret\u001b]8;;https://evil.example\u0007link",
     error: "Failed token=secret \u001b]8;;https://evil.example\u0007link",
+  }),
+);
+await capture(
+  buildThemePaletteView({
+    themes: [
+      { id: "opencode", name: "opencode" },
+      { id: "tokyonight", name: "tokyonight" },
+    ],
+    selectedThemeId: "opencode",
+    query: "",
   }),
 );
 

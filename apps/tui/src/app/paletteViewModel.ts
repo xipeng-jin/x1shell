@@ -1,7 +1,8 @@
 import { ensureBrowseDirectoryPath } from "@t3tools/shared/projectPaths";
 import type { TuiActionId, TuiActionDefinition } from "../domain/keybindings.js";
+import type { TuiThemeOption } from "../terminal/theme.js";
 
-export type TuiPaletteMode = "actions" | "add-project-sources" | "add-project-browse";
+export type TuiPaletteMode = "actions" | "add-project-sources" | "add-project-browse" | "themes";
 
 export type TuiPaletteItem =
   | {
@@ -25,6 +26,12 @@ export type TuiPaletteItem =
     }
   | {
       readonly kind: "browse-up";
+    }
+  | {
+      readonly kind: "theme";
+      readonly id: string;
+      readonly title: string;
+      readonly selected: boolean;
     };
 
 export interface TuiPaletteViewModel {
@@ -87,6 +94,29 @@ export function buildAddProjectBrowsePaletteView(input: {
     loading: input.loading ?? false,
     error: input.error ?? null,
     items: input.items ?? [],
+  };
+}
+
+export function buildThemePaletteView(input: {
+  readonly themes: readonly TuiThemeOption[];
+  readonly selectedThemeId: string;
+  readonly query: string;
+}): TuiPaletteViewModel {
+  const normalizedQuery = input.query.trim().toLowerCase();
+  const items = input.themes
+    .filter((theme) => theme.name.toLowerCase().includes(normalizedQuery))
+    .map((theme) => ({
+      kind: "theme" as const,
+      id: theme.id,
+      title: theme.name,
+      selected: theme.id === input.selectedThemeId,
+    }));
+
+  return {
+    mode: "themes",
+    title: "Themes",
+    query: input.query,
+    items,
   };
 }
 

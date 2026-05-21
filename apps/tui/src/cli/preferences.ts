@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import type { TuiPaths } from "./config.js";
 
 export interface TuiPreferences {
@@ -31,6 +32,19 @@ export function normalizePreferences(value: unknown): TuiPreferences {
       ? { useKittyKeyboard: input.useKittyKeyboard }
       : {}),
   };
+}
+
+export async function writePreferences(
+  paths: TuiPaths,
+  preferences: TuiPreferences,
+): Promise<void> {
+  const normalized = normalizePreferences(preferences);
+  await mkdir(dirname(paths.prefsFile), { recursive: true });
+  const tempFile = `${paths.prefsFile}.${process.pid}.${Date.now()}.${Math.random()
+    .toString(36)
+    .slice(2)}.tmp`;
+  await writeFile(tempFile, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+  await rename(tempFile, paths.prefsFile);
 }
 
 function isMissingFileError(error: unknown): boolean {

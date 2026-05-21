@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveTuiPaths } from "./config.js";
-import { normalizePreferences, readPreferences } from "./preferences.js";
+import { normalizePreferences, readPreferences, writePreferences } from "./preferences.js";
 
 describe("preferences", () => {
   it("normalizes supported preference values only", () => {
@@ -39,6 +39,36 @@ describe("preferences", () => {
     await writeFile(paths.prefsFile, JSON.stringify({ theme: "amber", useMouse: false }), "utf8");
 
     await expect(readPreferences(paths)).resolves.toEqual({ theme: "amber", useMouse: false });
+  });
+
+  it("writes normalized preferences atomically", async () => {
+    const dir = await createTempDir();
+    const paths = resolveTuiPaths({
+      HOME: dir,
+      X1SHELL_CONFIG_HOME: join(dir, "config"),
+    });
+
+    await writePreferences(paths, { theme: " opencode ", useMouse: false });
+
+    await expect(readPreferences(paths)).resolves.toEqual({ theme: "opencode", useMouse: false });
+    await expect(readFile(paths.prefsFile, "utf8")).resolves.toContain('"theme": "opencode"');
+  });
+
+  it("allows overlapping preference writes without temp-file collisions", async () => {
+    const dir = await createTempDir();
+    const paths = resolveTuiPaths({
+      HOME: dir,
+      X1SHELL_CONFIG_HOME: join(dir, "config"),
+    });
+
+    await Promise.all([
+      writePreferences(paths, { theme: "opencode" }),
+      writePreferences(paths, { theme: "tokyonight" }),
+    ]);
+
+    await expect(readPreferences(paths)).resolves.toMatchObject({
+      theme: expect.stringMatching(/^(opencode|tokyonight)$/),
+    });
   });
 });
 

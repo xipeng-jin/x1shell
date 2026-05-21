@@ -4,6 +4,7 @@ import {
   buildActionPaletteView,
   buildAddProjectBrowsePaletteView,
   buildAddProjectSourcesPaletteView,
+  buildThemePaletteView,
   initialAddProjectBrowseQuery,
 } from "./paletteViewModel.js";
 
@@ -61,5 +62,23 @@ describe("paletteViewModel", () => {
     );
     expect(initialAddProjectBrowseQuery({ addProjectBaseDirectory: "  " })).toBe("~/");
     expect(initialAddProjectBrowseQuery({ addProjectBaseDirectory: null })).toBe("~/");
+  });
+
+  it("builds filtered theme rows and marks the initially selected theme", () => {
+    const view = buildThemePaletteView({
+      themes: [
+        { id: "opencode", name: "opencode" },
+        { id: "tokyonight", name: "tokyonight" },
+      ],
+      selectedThemeId: "tokyonight",
+      query: "night",
+    });
+
+    expect(view).toEqual({
+      mode: "themes",
+      title: "Themes",
+      query: "night",
+      items: [{ kind: "theme", id: "tokyonight", title: "tokyonight", selected: true }],
+    });
   });
 });

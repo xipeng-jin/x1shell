@@ -10,6 +10,7 @@ import {
   buildActionPaletteView,
   buildAddProjectBrowsePaletteView,
   buildAddProjectSourcesPaletteView,
+  buildThemePaletteView,
 } from "../app/paletteViewModel.js";
 
 const TUI_PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -69,8 +70,27 @@ describe("CommandPalette", () => {
     expect(frame).toContain("~/Code/");
     expect(frame).toContain("workspace");
     expect(frame).toContain("Failed");
+    expect(frame).toContain("Themes");
+    expect(frame).toContain("opencode");
+    expect(frame).toContain("tokyonight");
     expect(frame).not.toContain("token=secret");
     expect(frame).not.toContain("\u001b]8");
     expect(frame).not.toContain("evil.example");
+  });
+
+  it("builds theme selection rows inside the palette view", () => {
+    const view = buildThemePaletteView({
+      themes: [
+        { id: "opencode", name: "opencode" },
+        { id: "tokyonight", name: "tokyonight" },
+      ],
+      selectedThemeId: "opencode",
+      query: "",
+    });
+
+    expect(view.items).toEqual([
+      { kind: "theme", id: "opencode", title: "opencode", selected: true },
+      { kind: "theme", id: "tokyonight", title: "tokyonight", selected: false },
+    ]);
   });
 });
